@@ -40,7 +40,7 @@ OUTPUTS = {
 # Values inserted as YAML scalars: quoted with JSON's escaping, which YAML's
 # double-quoted style reads the same way.
 QUOTED = {"setup", "check", "e2e", "sibling", "sibling_ref", "live_command", "sweep", "live_cloud"}
-RAW = {"ci_ref", "ci_tag", "free_disk", "live_timeout", "security_cron"}
+RAW = {"ci_ref", "ci_tag", "free_disk", "timeout", "live_timeout", "security_cron"}
 FLAGS = {"live"}
 # The header every rendered file starts with (callers/*.yml); sync only
 # deletes a file that carries it.
@@ -73,6 +73,9 @@ def load(path: str) -> list[dict]:
             raise ValueError(f"{name}: live = true needs a live_command")
         if merged["live_cloud"] not in ("gcp", "aws", "azure", "none"):
             raise ValueError(f"{name}: live_cloud must be gcp, aws, azure or none")
+        for k in ("timeout", "live_timeout"):
+            if not isinstance(merged[k], int) or isinstance(merged[k], bool) or not 5 <= merged[k] <= 360:
+                raise ValueError(f"{name}: {k} must be minutes, 5 to 360")
         if not CRON.fullmatch(str(merged["security_cron"])):
             raise ValueError(f"{name}: security_cron {merged['security_cron']!r} is not a cron expression")
         repos.append(merged)

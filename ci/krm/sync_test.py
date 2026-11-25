@@ -59,6 +59,19 @@ class Sync(unittest.TestCase):
         text = sync.outputs(self.repos[0], REF)[".github/dependabot.yml"]
         self.assertIn('dependency-name: "highfivelabs/krm-ci*"', text)
 
+    def test_timeout(self):
+        names = {r["name"]: r for r in self.repos}
+        self.assertIn("timeout-minutes: 180", sync.outputs(names["ack-extensions"], REF)[".github/workflows/hfl-ci.yml"])
+        for bad in ("0", "1000", '"30"', "true"):
+            with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+                with open(os.path.join(os.path.dirname(__file__), "repos.toml")) as orig:
+                    fh.write(orig.read().replace("timeout = 20\n", f"timeout = {bad}\n", 1))
+            try:
+                with self.assertRaises(ValueError, msg=bad):
+                    sync.load(fh.name)
+            finally:
+                os.unlink(fh.name)
+
     def test_bad_config(self):
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
             fh.write('[profile.p]\nsetup=""\n[[repo]]\nname="x"\nprofile="p"\n')

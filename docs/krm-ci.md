@@ -368,6 +368,12 @@ the same environment.
      re-record, stays until `hfl-live.yml` is switched on.
    - `krm-rest-runtime`: `hack/ci.sh` too; `live-rerecord.yml` stays (the
      vendor repositories' `live.yml` calls it).
+   - Operator repositories: `hack/ci/pr.sh check|e2e` keeps their
+     selective runs (`hack/ci/select.sh` on BASE_SHA..HEAD_SHA; a push runs
+     everything), on GitHub's runners now that the repositories are public.
+     Their Taskfile include moves to krm-ci's `taskfiles/`, so the factory
+     App (`factory-access`) goes, and with it the reason a fork's pull
+     request failed. `nightly.yml` and `release.yml` stay.
    - Start with `cloudflare-krm-extensions`, the smallest repository that
      has a live run, then the other vendor repos, `krm-rest-runtime`, and
      the operator repos last.

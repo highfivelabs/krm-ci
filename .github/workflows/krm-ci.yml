@@ -37,7 +37,7 @@ on:
         type: string
         default: ""
       e2e-command:
-        description: The kind end-to-end test; empty for none
+        description: The kind end-to-end test; empty for none. BASE_SHA and HEAD_SHA are set, as for check-command, so it can skip itself.
         type: string
         default: ""
       runs-on:
@@ -276,6 +276,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src/${{ github.event.repository.name }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
@@ -289,8 +290,11 @@ jobs:
         env:
           CMD: ${{ inputs.setup-command }}
         run: bash -euo pipefail -c "${CMD}"
-      - env:
+      - name: End-to-end
+        env:
           CMD: ${{ inputs.e2e-command }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -euo pipefail -c "${CMD}"
       - name: Cluster state on failure
         if: failure()

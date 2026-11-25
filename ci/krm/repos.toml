@@ -19,6 +19,7 @@
 #                           The contract: everything the live command makes is
 #                           named or tagged with LIVE_RUN_ID, and sweep deletes
 #                           what carries it.
+#   timeout                 minutes for krm-ci.yml's test and e2e jobs
 #   live_timeout            minutes
 #   security_cron           the weekly scan's schedule, spread so the
 #                           repositories don't all run at once
@@ -36,6 +37,7 @@ setup = ""
 check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" install -q pyyaml==6.0.3 && export PATH="${RUNNER_TEMP}/py/bin:${PATH}" && RUNTIME="${PWD}/../krm-rest-runtime" hack/ci.sh'''
 e2e = ""
 free_disk = false
+timeout = 30
 sibling = "krm-rest-runtime"
 # The runtime commit whose generator (gen/) the repositories' generated
 # files match; a full SHA, since krm-rest-runtime has no tags. go.mod pins the
@@ -47,17 +49,23 @@ live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_T
 sweep = ""
 live_timeout = 45
 
-# Live off until each repository's migration: their run scripts make their
-# own run IDs (cce-…, ackx-…) and sweep by those, not by LIVE_RUN_ID, and
-# their credentials come from offload VMs today (review round 1, R3).
+# Each operator repository's hack/ci/pr.sh plans from the changed paths
+# (its hack/ci/select.sh, BASE_SHA..HEAD_SHA; a push runs everything) and
+# installs its tools only when something runs: `check` is task ci:check for
+# the plan, `e2e` is task operator-e2e when the plan asks for it.
+# Live off until each repository's live run keeps the LIVE_RUN_ID contract:
+# their run scripts make their own run IDs (cce-…, ackx-…) and sweep by
+# those, and their credentials come from offload VMs today (review round 1,
+# R3).
 [profile.operator]
 live = false
 live_cloud = "none"
 live_command = ""
-setup = "task tools"
-check = "task check"
-e2e = "task operator-e2e"
+setup = ""
+check = "hack/ci/pr.sh check"
+e2e = "hack/ci/pr.sh e2e"
 free_disk = true
+timeout = 90
 sibling = ""
 sibling_ref = ""
 live_timeout = 60
@@ -71,6 +79,7 @@ setup = ""
 check = "hack/ci.sh"
 e2e = ""
 free_disk = false
+timeout = 20
 sibling = ""
 sibling_ref = ""
 live_cloud = "gcp"
@@ -88,6 +97,8 @@ security_cron = "40 7 * * 1"
 name = "ack-extensions"
 profile = "operator"
 live_cloud = "aws"
+# e2e also runs the ACK controllers against the moto emulator.
+timeout = 180
 security_cron = "40 8 * * 1"
 
 [[repo]]
