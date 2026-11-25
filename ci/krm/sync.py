@@ -149,7 +149,10 @@ def main(argv=None) -> int:
             continue
         for dest, text in outputs(r, args.ref, args.tag or "untagged").items():
             path = os.path.join(root, dest)
-            current = open(path, encoding="utf-8").read() if os.path.exists(path) else None
+            current = None
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    current = fh.read()
             if current == text:
                 continue
             if args.check:

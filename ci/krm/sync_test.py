@@ -75,7 +75,8 @@ class Sync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "cloudflare-krm-extensions"))
             cfg = os.path.join(d, "repos.toml")
-            src = open(os.path.join(os.path.dirname(__file__), "repos.toml")).read()
+            with open(os.path.join(os.path.dirname(__file__), "repos.toml")) as fh:
+                src = fh.read()
             with open(cfg, "w") as fh:
                 fh.write(src)
             argv = ["--ref", REF, "--repos-dir", d, "--only", "cloudflare-krm-extensions", "--config", cfg]

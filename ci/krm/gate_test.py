@@ -392,7 +392,8 @@ class CLI(unittest.TestCase):
             env = dict(os.environ, MYKEY="topsecretvalue")
             subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(__file__), "gate.py"), "redact",
                             "--file", p, "--redact-env", "MYKEY"], check=True, env=env, capture_output=True)
-            txt = open(p).read()
+            with open(p) as fh:
+                txt = fh.read()
             self.assertNotIn("sk-ant-api03", txt)
             self.assertNotIn("topsecretvalue", txt)
 
