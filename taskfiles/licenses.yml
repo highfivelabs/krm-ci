@@ -55,8 +55,18 @@ tasks:
           GOBIN="${bin}" go install "{{.GO_LICENSES}}"
         fi
         # go-licenses prints "module,url,licence"; keep the first and last.
-        report="$("${bin}/go-licenses" report {{.PKGS}} 2>/dev/null | awk -F, '{print $1 "," $NF}' | sort -u)"
-        [[ -n "${report}" ]] || { echo "licenses: go-licenses reported nothing for {{.PKGS}}" >&2; exit 1; }
+        # go-licenses warns on stderr as a matter of course: show it only when
+        # it fails, so the reason (a package that does not load, a download
+        # error) is in the log.
+        err="$(mktemp)"
+        trap 'rm -f "${err}"' EXIT
+        raw="$("${bin}/go-licenses" report {{.PKGS}} 2>"${err}")" || {
+          cat "${err}" >&2
+          echo "licenses: go-licenses failed for {{.PKGS}} (above)" >&2
+          exit 1
+        }
+        report="$(awk -F, 'NF {print $1 "," $NF}' <<<"${raw}" | sort -u)"
+        [[ -n "${report}" ]] || { cat "${err}" >&2; echo "licenses: go-licenses reported nothing for {{.PKGS}}" >&2; exit 1; }
         # ALLOW_FILE: "path licence  # why". path is a module or package path
         # and covers what is below it; licence is what a person found, and
         # must itself be accepted. It settles only a module go-licenses
@@ -100,9 +110,11 @@ tasks:
       - |
         set -euo pipefail
         # An SPDX line naming one of them, or the grant sentence those
-        # licences ask each file to carry. Only a file's first 30 lines.
+        # licences ask each file to carry, in a file's first 30 lines. The
+        # sentence is matched with the lines joined and comment marks dropped,
+        # since the usual notices break it across lines.
         spdx='^[^A-Za-z0-9]*SPDX-License-Identifier:.*(MPL-|GPL-|AGPL-|LGPL-|SSPL-|BUSL-)'
-        grant='subject to the terms of the Mozilla Public License|under the terms of the GNU (Affero |Lesser )?General Public License as published|Licensed under the Business Source License'
+        grant='subject to the terms of the Mozilla Public License|terms of the GNU (Affero |Lesser |Library )?General Public License|terms of the Server Side Public License|Licensed under the Business Source License'
         list="$(mktemp)"
         trap 'rm -f "${list}"' EXIT
         git ls-files --cached --others --exclude-standard -- . \
@@ -111,7 +123,9 @@ tasks:
         hits=0
         while IFS= read -r f; do
           [[ -f "${f}" ]] || continue
-          if head -n 30 "${f}" 2>/dev/null | LC_ALL=C grep -E -e "${spdx}" -e "${grant}" >/dev/null; then
+          top="$(head -n 30 "${f}" 2>/dev/null | LC_ALL=C tr -d '\000')"
+          joined="$(LC_ALL=C tr -c '[:alnum:].,' ' ' <<<"${top}" | tr -s ' ')"
+          if LC_ALL=C grep -E -e "${spdx}" >/dev/null <<<"${top}" || LC_ALL=C grep -E -e "${grant}" >/dev/null <<<"${joined}"; then
             echo "licenses: ${f}: copyleft or source-available licence header (link such code, never copy it)" >&2
             hits=$((hits + 1))
           fi
