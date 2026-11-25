@@ -37,9 +37,11 @@ check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" in
 e2e = ""
 free_disk = false
 sibling = "krm-rest-runtime"
-# A full SHA: krm-rest-runtime has no tags. The same commit as go.mod's
-# krm-rest-runtime pseudo-version; move both together.
-sibling_ref = "dadbee3bd1c79ca3d9379d9803fcc380b9d100d7"
+# The runtime commit whose generator (gen/) the repositories' generated
+# files match; a full SHA, since krm-rest-runtime has no tags. go.mod pins the
+# runtime's Go packages separately. Move this when the runtime's generator
+# changes, regenerating every vendor repository in the same rollout.
+sibling_ref = "7439d5548d68dd401cdf0eda6471c1df3f058d2f"
 live_cloud = "gcp"
 live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
 sweep = ""
