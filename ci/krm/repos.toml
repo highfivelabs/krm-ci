@@ -19,6 +19,9 @@
 #                           The contract: everything the live command makes is
 #                           named or tagged with LIVE_RUN_ID, and sweep deletes
 #                           what carries it.
+#   licenses_packages       Go packages whose linked modules' licences are
+#                           checked after the check (taskfiles/licenses.yml);
+#                           "" checks only file headers
 #   timeout                 minutes for krm-ci.yml's test and e2e jobs
 #   live_timeout            minutes
 #   security_cron           the weekly scan's schedule, spread so the
@@ -43,7 +46,8 @@ sibling = "krm-rest-runtime"
 # files match; a full SHA, since krm-rest-runtime has no tags. go.mod pins the
 # runtime's Go packages separately. Move this when the runtime's generator
 # changes, regenerating every vendor repository in the same rollout.
-sibling_ref = "7439d5548d68dd401cdf0eda6471c1df3f058d2f"
+sibling_ref = "fad382d05df5a1b0a7c339f174ecd6a3abb06721"
+licenses_packages = "./..."
 live_cloud = "gcp"
 live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
 sweep = ""
@@ -68,6 +72,10 @@ free_disk = true
 timeout = 90
 sibling = ""
 sibling_ref = ""
+# Each operator repository names its own binaries; their packages load
+# after the check has fetched the upstream checkout (krm-ci.yml runs the
+# module check after it).
+licenses_packages = ""
 live_timeout = 60
 sweep = ""
 
@@ -82,6 +90,7 @@ free_disk = false
 timeout = 20
 sibling = ""
 sibling_ref = ""
+licenses_packages = "./..."
 live_cloud = "gcp"
 live_command = ""
 sweep = ""
@@ -90,12 +99,14 @@ live_timeout = 30
 [[repo]]
 name = "config-connector-extensions"
 profile = "operator"
+licenses_packages = "./cmd/manager ./cmd/operator"
 live_cloud = "gcp"
 security_cron = "40 7 * * 1"
 
 [[repo]]
 name = "ack-extensions"
 profile = "operator"
+licenses_packages = "./services/iam/cmd/controller ./services/rds/cmd/controller ./cmd/operator"
 live_cloud = "aws"
 # e2e also runs the ACK controllers against the moto emulator.
 timeout = 180
@@ -104,6 +115,7 @@ security_cron = "40 8 * * 1"
 [[repo]]
 name = "aso-extensions"
 profile = "operator"
+licenses_packages = "./cmd/manager"
 live_cloud = "azure"
 security_cron = "40 9 * * 1"
 

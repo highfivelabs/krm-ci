@@ -12,6 +12,11 @@
 #   test   the repository's own hermetic check (inputs.check-command): its
 #          generated-files drift check, the build, the tests against its
 #          fake cloud or recorded cassettes. No secrets, no cloud.
+#          Licences (taskfiles/licenses.yml): before it, no MPL, GPL, AGPL,
+#          LGPL, SSPL or BUSL licence header in the repository's own files;
+#          after it, every Go module linked into inputs.licenses-packages
+#          under an accepted licence (permissive, or MPL-2.0 linked
+#          unmodified), on a push and on a pull request that changes go.mod.
 #   e2e    the repository's kind end-to-end test, when it has one.
 #   ci     the one status branch protection requires: fails if any job
 #          above failed or was cancelled; a skipped job is fine
@@ -66,6 +71,10 @@ on:
         default: true
       go-packages:
         description: The packages golangci-lint and govulncheck look at
+        type: string
+        default: ./...
+      licenses-packages:
+        description: The packages whose linked Go modules' licences are checked after the hermetic check (taskfiles/licenses.yml); empty checks only file headers
         type: string
         default: ./...
 
@@ -246,12 +255,41 @@ jobs:
         env:
           CMD: ${{ inputs.setup-command }}
         run: bash -euo pipefail -c "${CMD}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: taskfiles
+          persist-credentials: false
+      - name: Licences (file headers)
+        run: task --taskfile ../../.hfl-ci/taskfiles/licenses.yml headers
       - name: Hermetic check
         env:
           CMD: ${{ inputs.check-command }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -euo pipefail -c "${CMD}"
+      # After the check: an operator repository's packages load only once
+      # its check has fetched the upstream checkout. A pull request that
+      # changes no go.mod, go.sum or .licenses-allow.txt links the same
+      # modules as its base, so it skips this; a push checks everything.
+      - name: Licences (linked Go modules)
+        if: inputs.licenses-packages != ''
+        env:
+          PKGS: ${{ inputs.licenses-packages }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT}" == pull_request ]]; then
+            changed="$(git diff --name-only "$(git merge-base "${BASE}" HEAD)" HEAD)"
+            if ! grep -Eq '(^|/)go\.(mod|sum)$|(^|/)\.licenses-allow\.txt$' <<<"${changed}"; then
+              echo "licences: no go.mod, go.sum or .licenses-allow.txt changed; the linked modules are the base's"
+              exit 0
+            fi
+          fi
+          task --taskfile ../../.hfl-ci/taskfiles/licenses.yml deps PKGS="${PKGS}"
       - name: Generated files are committed
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then

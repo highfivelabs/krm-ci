@@ -150,9 +150,25 @@ token. Nothing in the workflow asks for more.
 | Job | Checks | Blocks on |
 | --- | --- | --- |
 | `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes; a reachable vulnerability that is new in the PR's head |
-| `test` | the repository's hermetic check, then "the working tree is clean" | failure or drift |
+| `test` | no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header in the repository's own files (`taskfiles/licenses.yml`); the repository's hermetic check; every Go module linked into `licenses_packages` under an accepted licence (on a push, or a PR that changes `go.mod`); "the working tree is clean" | a copyleft or source-available header; a module outside the accepted set and not reviewed in `.licenses-allow.txt`; failure or drift |
 | `e2e` | kind end to end, if the repository has one | failure |
 | `ci` | the gatekeeper | anything above failed or was cancelled (skipped is fine) |
+
+**Licences (HFL-714).** A dependency may be permissive (Apache-2.0, MIT,
+BSD, ISC, Zlib, Unicode) or MPL-2.0. MPL code is linked unmodified, never
+patched and never copied into our files: the header check catches a copied
+file, and config-connector-extensions' decision 41 records the rule. BUSL
+(Terraform core since 1.6, Vault, Consul, ...) and the GPL family are never
+accepted. A module go-licenses cannot classify fails until someone reviews
+it and lists it in the repository's `.licenses-allow.txt` as
+`module licence  # why`. The header check runs before the
+repository's check. The module check runs after it, because an operator
+repository's packages load only once its check has fetched the upstream
+checkout. A pull request that changes no `go.mod`, `go.sum` or
+`.licenses-allow.txt` links the same modules as its base, so it skips the
+module check; every push to `main` runs it. Each repository's
+`licenses_packages` in `repos.toml` names the packages: `./...` for the
+vendor repositories and the runtime, the binaries for the operators.
 
 **Why govulncheck fails only on what a PR adds:** on 2026-11-24,
 `cloudflare-krm-extensions` alone had 14 reachable vulnerabilities (x/net,

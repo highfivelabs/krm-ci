@@ -33,3 +33,4 @@ jobs:
       timeout-minutes: @@{timeout}
       sibling-repo: @@{sibling}
       sibling-ref: @@{sibling_ref}
+      licenses-packages: @@{licenses_packages}
