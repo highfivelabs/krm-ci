@@ -20,8 +20,10 @@
 #
 # Vars:
 #   PKGS        packages to report on (default ./...)
-#   ALLOW_FILE  reviewed exceptions, one "module licence  # why" per line
-#               (default .licenses-allow.txt; optional)
+#   ALLOW_FILE  reviewed exceptions for modules go-licenses cannot classify,
+#               one "path licence  # why" per line; path covers what is below
+#               it, and licence must be accepted (default .licenses-allow.txt;
+#               optional)
 #   EXCLUDE     extra pathspecs left out of the header check, space-separated
 #               (e.g. ':!testdata/upstream/**')
 version: '3'
@@ -55,20 +57,37 @@ tasks:
         # go-licenses prints "module,url,licence"; keep the first and last.
         report="$("${bin}/go-licenses" report {{.PKGS}} 2>/dev/null | awk -F, '{print $1 "," $NF}' | sort -u)"
         [[ -n "${report}" ]] || { echo "licenses: go-licenses reported nothing for {{.PKGS}}" >&2; exit 1; }
+        # ALLOW_FILE: "path licence  # why". path is a module or package path
+        # and covers what is below it; licence is what a person found, and
+        # must itself be accepted. It settles only a module go-licenses
+        # reports as Unknown (or as that same licence): it never lets in a
+        # licence outside the accepted set.
         allowed=""
         if [[ -f "{{.ALLOW_FILE}}" ]]; then
-          allowed="$(sed 's/#.*//' "{{.ALLOW_FILE}}" | awk 'NF >= 2 {print $1 "," $2}')"
+          allowed="$(sed 's/#.*//' "{{.ALLOW_FILE}}" | awk 'NF >= 2 {print $1 " " $2}')"
+          while read -r path lic; do
+            [[ -n "${path}" ]] || continue
+            if ! [[ "${lic}" =~ ^({{.ACCEPTED}})$ ]]; then
+              echo "licenses: {{.ALLOW_FILE}}: ${path}: ${lic} is not an accepted licence; an exception cannot add one" >&2
+              exit 1
+            fi
+          done <<<"${allowed}"
         fi
         bad=""
         while IFS=, read -r mod lic; do
           [[ -n "${mod}" ]] || continue
           if [[ "${lic}" =~ ^({{.ACCEPTED}})$ ]]; then continue; fi
-          if grep -qxF "${mod},${lic}" <<<"${allowed}"; then continue; fi
+          ok=false
+          while read -r path rev; do
+            [[ -n "${path}" ]] || continue
+            if [[ "${mod}" == "${path}" || "${mod}" == "${path}/"* ]] && [[ "${lic}" == Unknown || "${lic}" == "${rev}" ]]; then ok=true; break; fi
+          done <<<"${allowed}"
+          if [[ "${ok}" == true ]]; then continue; fi
           bad="${bad}  ${mod}: ${lic}"$'\n'
         done <<<"${report}"
         if [[ -n "${bad}" ]]; then
           printf 'licenses: modules outside the accepted set (Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, MPL-2.0):\n%s' "${bad}" >&2
-          echo "licenses: drop the module, or review it and add \"module licence  # why\" to {{.ALLOW_FILE}}" >&2
+          echo "licenses: drop the module; or, for one reported Unknown, read its licence and add \"path licence  # why\" to {{.ALLOW_FILE}}" >&2
           exit 1
         fi
         mpl="$(grep -c ',MPL-2.0$' <<<"${report}" || true)"
