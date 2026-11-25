@@ -4,9 +4,10 @@
 #
 # Everything that must hold before a commit, and what check.yml runs on
 # every pull request: the gate and sync tests, a render of every
-# repository's callers, shellcheck, actionlint and zizmor. The lint tools
-# come from ci/krm/tools.sh (task krm:tools); shellcheck from the package
-# manager (it is on GitHub's runners).
+# repository's callers, the shared Taskfile parses, shellcheck, actionlint
+# and zizmor. The lint tools come from ci/krm/tools.sh (task krm:tools);
+# the package manager supplies shellcheck (GitHub's runners have it) and
+# task (check.yml installs it).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -14,6 +15,9 @@ tools="$(ci/krm/tools.sh --dir)"
 export PATH="${tools}:${PATH}"
 
 python3 -m unittest discover -s ci/krm -p '*_test.py'
+
+# The shared Taskfile the operator repositories include parses.
+task --taskfile taskfiles/go.yml --list-all >/dev/null
 
 # Every repository's callers render at this commit.
 out="$(mktemp -d)"

@@ -48,7 +48,12 @@ class Sync(unittest.TestCase):
         for n in ("config-connector-extensions", "ack-extensions", "aso-extensions", "krm-rest-runtime"):
             self.assertNotIn(".github/workflows/hfl-live.yml", sync.outputs(names[n], REF), n)
         self.assertIn(".github/workflows/hfl-live.yml", sync.outputs(names["cloudflare-krm-extensions"], REF))
-        self.assertEqual(names["sentry-krm-extensions"]["sibling_ref"], "v0.19.1")
+
+    def test_sibling_pinned_by_commit(self):
+        # krm-rest-runtime has no tags: a sibling is pinned by its full SHA.
+        for r in self.repos:
+            if r["sibling"]:
+                self.assertRegex(r["sibling_ref"], r"^[0-9a-f]{40}$", r["name"])
 
     def test_dependabot_leaves_the_pin_to_sync(self):
         text = sync.outputs(self.repos[0], REF)[".github/dependabot.yml"]

@@ -30,11 +30,16 @@
 [profile.vendor]
 live = true
 setup = ""
-check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" install -q pyyaml==6.0.3 && export PATH="${RUNNER_TEMP}/py/bin:${PATH}" && hack/gen/generate.sh && go build ./... && go vet ./... && go vet -tags live ./... && go test ./...'''
+# hack/ci.sh is the repository's own check (generated files current, build,
+# vet with and without -tags live, test), the one people run locally; RUNTIME
+# is the sibling checkout, so it generates with the pinned runtime.
+check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" install -q pyyaml==6.0.3 && export PATH="${RUNNER_TEMP}/py/bin:${PATH}" && RUNTIME="${PWD}/../krm-rest-runtime" hack/ci.sh'''
 e2e = ""
 free_disk = false
 sibling = "krm-rest-runtime"
-sibling_ref = "v0.19.0"
+# A full SHA: krm-rest-runtime has no tags. The same commit as go.mod's
+# krm-rest-runtime pseudo-version; move both together.
+sibling_ref = "dadbee3bd1c79ca3d9379d9803fcc380b9d100d7"
 live_cloud = "gcp"
 live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
 sweep = ""
@@ -61,7 +66,7 @@ sweep = ""
 [profile.runtime]
 live = false
 setup = ""
-check = "go build ./... && go vet ./... && go test ./..."
+check = "hack/ci.sh"
 e2e = ""
 free_disk = false
 sibling = ""
@@ -148,7 +153,6 @@ security_cron = "50 7 * * 2"
 [[repo]]
 name = "sentry-krm-extensions"
 profile = "vendor"
-sibling_ref = "v0.19.1"
 security_cron = "10 8 * * 2"
 
 [[repo]]

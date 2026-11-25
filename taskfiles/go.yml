@@ -8,7 +8,7 @@
 #
 #   includes:
 #     go:
-#       taskfile: https://github.com/highfivelabs/factory.git//taskfiles/go.yml?ref=taskfiles/v1.0.0
+#       taskfile: https://github.com/highfivelabs/krm-ci.git//taskfiles/go.yml?ref=v1.1.0
 #       checksum: <sha256 of this file at that tag>
 #       vars: {BIN: "{{.ROOT_DIR}}/bin"}
 version: '3'
