@@ -6,18 +6,15 @@ repositories (`config-connector-extensions`, `ack-extensions`,
 (`*-krm-extensions`). It is defined once and each repository calls it.
 Linear: HFL-695. Written 2026-11-24.
 
-**Where it lives:** `highfivelabs/krm-ci`, a public repository. A public
-repository can only call a reusable workflow from a public one, and factory
-is private. tf-infra creates the repository. Until it exists, the code is
-staged here (`.github/workflows/krm-*.yml` and `ci/krm/`), laid out exactly
-as it will be there, and is tested by factory's `task check`. Once the
-repository exists, both paths move to it, with history, and are deleted
-here.
+**Where it lives:** here, `highfivelabs/krm-ci`, a public repository. A
+public repository can only call a reusable workflow from a public one.
+tf-infra created it; the code was staged in the private factory repository
+until then and moved here with its history.
 
-**Status:** built here and tested offline (`task check`). No repository
-calls it yet: the repositories are private on GitHub Free, where Actions
-jobs are refused for billing, so `task ci` on offload stays the merge gate
-until they go public at launch (HFL-683). Section 9 gives the rollout.
+**Status:** tested offline (`task check`; `check.yml` on every pull
+request). No repository calls it yet: the repositories are private on
+GitHub Free, where Actions jobs are refused for billing, so `task ci` on
+offload stays the merge gate until they go public at launch (HFL-683). Section 9 gives the rollout.
 
 ## 1. What the upstream teams do (surveyed 2026-11-24)
 
@@ -85,7 +82,7 @@ Service Operator was also read through our own PR #5844.
 ## 3. Shape
 
 ```
-highfivelabs/krm-ci (staged in factory until it exists)
+highfivelabs/krm-ci
   .github/workflows/krm-ci.yml        lint + hermetic test + e2e + the `ci` gatekeeper
   .github/workflows/krm-review.yml    Claude security review (blocking for live) + first pass (advisory)
   .github/workflows/krm-live.yml      live tests behind three locks
@@ -357,14 +354,12 @@ the same environment.
    - Set up tf-infra's cloud trust (section 6) and repository settings
      (section 8).
 3. **The public home, `highfivelabs/krm-ci`.**
-   - tf-infra creates it (`terragrunt/prod/github`).
-   - Move `.github/workflows/krm-*.yml` and `ci/krm/` into it, with
-     history (`git subtree split`), and delete them from factory. The
-     callers already point at it.
+   - tf-infra created it (`terragrunt/prod/github`), and the code moved
+     here from factory with its history. Done.
    - Tag `v1.0.0`.
-   - The shared Taskfile include (`taskfiles/`) has the same problem: a
-     fork's PR can't fetch it from private factory. Move it to krm-ci too,
-     or vendor it into each repository.
+   - The shared Taskfile include (factory's `taskfiles/`) has the same
+     problem: a fork's PR can't fetch it from private factory. Move it
+     here too, or vendor it into each repository.
 4. **At launch, per repository.**
    - Run `task krm:sync -- --tag v1.0.0 --only <repo>`, delete its
      old `ci.yml`/`nightly.yml`, set the variables, and require `ci`.

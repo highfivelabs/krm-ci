@@ -1,0 +1,17 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# krm-ci's own actions (the pins in .github/workflows/), weekly, with a
+# week's cooldown as in the callers it renders (ci/krm/callers/dependabot.yml).
+# A bump here reaches the repositories only through a tag and sync.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
