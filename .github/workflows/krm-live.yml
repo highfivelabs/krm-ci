@@ -124,13 +124,28 @@ jobs:
           head="$(jq -r .head.sha "${t}/pr.json")"
           role="$(gh api "repos/${REPO}/collaborators/${USER}/permission" --jq .role_name 2>/dev/null || echo none)"
           gh api "repos/${REPO}/commits/${head}/statuses?per_page=100" > "${t}/statuses.json"
-          url="$(jq -r '[.[] | select(.context == "hfl/security-review")][0].target_url // ""' "${t}/statuses.json")"
+          # The review's verdict comes from the newest completed run of this
+          # repository's hfl-review.yml whose own record (the
+          # hfl-review-verdict artifact) names this head, never from the run
+          # a status links to: any workflow here can post a status, and
+          # could point it at an older run that passed before a later one
+          # failed (review round 3, S1).
           echo '{}' > "${t}/run.json"
-          if [[ "${url}" =~ ^https://github\.com/${REPO}/actions/runs/([0-9]+)$ ]]; then
-            gh api "repos/${REPO}/actions/runs/${BASH_REMATCH[1]}" > "${t}/run.json" || echo '{}' > "${t}/run.json"
-          fi
+          gh api "repos/${REPO}/actions/workflows/hfl-review.yml/runs?status=completed&per_page=50" \
+            --jq '.workflow_runs[] | select(.event == "pull_request_target" or .event == "issue_comment") | .id' \
+            > "${t}/runs.txt" 2>/dev/null || : > "${t}/runs.txt"
+          while read -r id; do
+            rm -rf "${t}/record" && mkdir -p "${t}/record"
+            gh run download "${id}" -R "${REPO}" -n hfl-review-verdict -D "${t}/record" 2>/dev/null || continue
+            if [[ "$(jq -r .sha "${t}/record/verdict.json" 2>/dev/null)" == "${head}" ]]; then
+              gh api "repos/${REPO}/actions/runs/${id}" > "${t}/run.json" || echo '{}' > "${t}/run.json"
+              break
+            fi
+            rm -rf "${t}/record"
+          done < "${t}/runs.txt"
           python3 -I .hfl-ci/ci/krm/gate.py live --event "${GITHUB_EVENT_PATH}" --pr "${t}/pr.json" \
             --role "${role}" --statuses "${t}/statuses.json" --review-run "${t}/run.json" \
+            --review-record "${t}/record/verdict.json" \
             --repository "${REPO}" --allowed-roles "${ROLES}" --max-kinds "${MAX_KINDS}" > "${t}/decision.json" || true
           cat "${t}/decision.json"
           jq -r '"ok=\(.ok)", "sha=\(.sha)", "kinds=\(.kinds | join(","))"' "${t}/decision.json" >> "${GITHUB_OUTPUT}"

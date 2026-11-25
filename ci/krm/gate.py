@@ -72,9 +72,10 @@ SENSITIVE = [
     ".gitleaksignore",
 ]
 
-# Generated or recorded files: they don't count toward the size limit and
-# alone do not make a pull request worth a model review. Each repository can
-# add globs in .review-generated (the same file the local review loop reads).
+# Generated or recorded files: they don't count toward the size limit, but
+# they are still reviewed (zz_generated*.go is code like any other). Each
+# repository can add globs in .review-generated (the same file the local
+# review loop reads), read from the base branch.
 GENERATED = [
     "**/zz_generated*",
     "zz_generated*",
@@ -88,7 +89,9 @@ GENERATED = [
     "go.sum",
 ]
 
-DOCS = ["**/*.md", "*.md", "docs/**", "LICENSE", "NOTICE", "**/*.png", "**/*.svg"]
+# Documentation by file type only, never by directory: docs/x_test.go is
+# code. A pull request made only of these skips the model review.
+DOCS = ["**/*.md", "*.md", "LICENSE", "NOTICE", "**/*.png", "**/*.jpg", "**/*.svg"]
 
 
 def _match(path: str, globs: list[str]) -> bool:
@@ -121,10 +124,13 @@ def classify(files: list[dict], extra_generated: list[str] | None = None) -> Cla
         names = [f["filename"]] + ([f["previous_filename"]] if f.get("previous_filename") else [])
         if any(_match(n, SENSITIVE) for n in names):
             c.sensitive.append(f["filename"])
+        # Generated files only stay out of the size count: they are still
+        # code (zz_generated*.go compiles into the live binary), so they are
+        # still reviewed. Only documentation, by file type, skips review.
         if not _match(f["filename"], generated):
             c.changed_lines += int(f.get("additions", 0)) + int(f.get("deletions", 0))
-            if not _match(f["filename"], DOCS):
-                non_doc += 1
+        if not all(_match(n, DOCS) for n in names):
+            non_doc += 1
     c.docs_only = len(files) > 0 and non_doc == 0 and not c.sensitive
     c.reviewable = len(files) > 0
     return c
@@ -284,6 +290,7 @@ def decide_live(
     max_kinds: int = 10,
     review_creator: str = REVIEW_CREATOR,
     review_run: dict | None = None,
+    review_record: dict | None = None,
     repository: str = "",
     review_workflow: str = REVIEW_WORKFLOW,
 ) -> LiveDecision:
@@ -294,7 +301,16 @@ def decide_live(
     /actions/runs/{id} for the run the review status links to; it must be
     the base repository's review workflow, run by pull_request_target or
     issue_comment (both always run the default branch's copy, never the
-    pull request's); a pull_request_target run must also be for this SHA."""
+    pull request's); a pull_request_target run must also be for this SHA.
+    review_record: the `hfl-review-verdict` artifact (verdict.json, written
+    by the post job) of the newest completed run of the review workflow
+    whose record names this head; review_run is that run. The workflow
+    finds it by listing the review workflow's runs, not by following the
+    status's link, so an older passing record can't be replayed after a
+    newer review failed. A status alone can be posted by
+    any workflow in the repository as github-actions[bot]; an artifact of a
+    run of the default branch's hfl-review.yml can't. The record must name
+    this SHA and say success, and its `sensitive` decides sensitive=ok."""
     reasons = []
     if event.get("action") != "created":
         return LiveDecision(False, reasons=["only a new comment counts, not an edit"])
@@ -336,7 +352,10 @@ def decide_live(
             reasons.append(f"{REVIEW_CONTEXT} on {sha[:12]} does not come from this repository's {review_workflow}")
         if review.get("state") != "success":
             reasons.append(f"{REVIEW_CONTEXT} is {review.get('state')} on {sha[:12]}")
-        elif "sensitive paths" in (review.get("description") or "") and not m.group("sensitive"):
+        rec = review_record or {}
+        if rec.get("sha") != sha or rec.get("state") != "success":
+            reasons.append(f"the review run's own record (artifact hfl-review-verdict) does not say success for {sha[:12]}")
+        elif rec.get("sensitive") is not False and not m.group("sensitive"):
             reasons.append("the change touches sensitive paths (build, harness, CI, dependencies): add sensitive=ok once you have read them")
     return LiveDecision(not reasons, sha, kinds, reasons)
 
@@ -508,6 +527,7 @@ def main(argv=None) -> int:
     a.add_argument("--allowed-roles", default="admin,maintain")
     a.add_argument("--max-kinds", type=int, default=10)
     a.add_argument("--review-run", help="GET /actions/runs/{id} of the run the review status links to")
+    a.add_argument("--review-record", help="that run's hfl-review-verdict artifact (verdict.json)")
     a.add_argument("--repository", default="")
     a = sub.add_parser("admit")
     a.add_argument("--event-name", required=True)
@@ -553,6 +573,7 @@ def main(argv=None) -> int:
                 allowed_roles=tuple(r for r in args.allowed_roles.split(",") if r),
                 max_kinds=args.max_kinds,
                 review_run=_load(args.review_run) if args.review_run else None,
+                review_record=_load(args.review_record) if args.review_record and os.path.exists(args.review_record) else None,
                 repository=args.repository,
             )
             print(json.dumps(asdict(d)))

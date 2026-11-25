@@ -32,11 +32,6 @@ jobs:
         github.event_name == 'pull_request_target' ||
         (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
       )
-    # Per pull request; a newer push or /review replaces a running review.
-    # On the job, not the workflow, so other comments cancel nothing.
-    concurrency:
-      group: hfl-review-${{ github.event.pull_request.number || github.event.issue.number }}
-      cancel-in-progress: true
     uses: highfivelabs/krm-ci/.github/workflows/krm-review.yml@@@{ci_ref} # @@{ci_tag}
     permissions:
       contents: read

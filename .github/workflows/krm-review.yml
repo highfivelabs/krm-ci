@@ -129,6 +129,11 @@ jobs:
   review:
     needs: admit
     if: needs.admit.outputs.run == 'true'
+    # Per pull request, and only once admitted: an admitted push or
+    # /review replaces a running review; a refused comment never gets here.
+    concurrency:
+      group: hfl-review-${{ github.repository }}-${{ needs.admit.outputs.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -168,8 +173,8 @@ jobs:
           gh api "repos/${REPO}/pulls/${NUMBER}" -H "Accept: application/vnd.github.diff" > pr/.hfl-review/diff.patch || true
           gh api "repos/${REPO}/pulls/${NUMBER}" --jq '{title, body, user: .user.login, author_association, base: .base.ref, head_repo: .head.repo.full_name}' > pr/.hfl-review/pr.json
           # The generated-file globs come from the base branch, never the
-          # pull request: otherwise it could call itself generated and skip
-          # review.
+          # pull request: otherwise it could call itself generated and slip
+          # past the size limit.
           gh api "repos/${REPO}/contents/.review-generated?ref=${BASE}" -H "Accept: application/vnd.github.raw" \
             > "${RUNNER_TEMP}/review-generated" 2>/dev/null || : > "${RUNNER_TEMP}/review-generated"
 
@@ -255,7 +260,8 @@ jobs:
 
   post:
     needs: [admit, review]
-    if: always() && needs.admit.outputs.run == 'true'
+    # A cancelled review was replaced by a newer one, which posts.
+    if: always() && needs.admit.outputs.run == 'true' && needs.review.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -286,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           gate=.hfl-ci/ci/krm/gate.py
-          mkdir -p out
+          mkdir -p out verdict-record
           [[ -f out/classify.json ]] || echo '{}' > out/classify.json
           case "${MODE}:${REVIEW}" in
             skip:success)
@@ -299,6 +305,12 @@ jobs:
             *)
               state=error desc="The review did not run to the end (${REVIEW})"; post_comment=false ;;
           esac
+          # This run's own record of its verdict. krm-live.yml trusts it, not
+          # the status: any workflow in the repository can post a status as
+          # github-actions[bot], but only this run has this artifact.
+          sensitive="$(jq '(.sensitive // ["unknown"]) | length > 0' out/classify.json)"
+          jq -n --arg sha "${SHA}" --arg state "${state}" --argjson sensitive "${sensitive}" \
+            '{sha: $sha, state: $state, sensitive: $sensitive}' > verdict-record/verdict.json
           gh api -X POST "repos/${REPO}/statuses/${SHA}" -f state="${state}" -f context=hfl/security-review \
             -f description="${desc:0:140}" -f target_url="${RUN_URL}" > /dev/null
           echo "${state}: ${desc}" >> "${GITHUB_STEP_SUMMARY}"
@@ -317,3 +329,8 @@ jobs:
             fi
           fi
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hfl-review-verdict
+          path: verdict-record/verdict.json
+          retention-days: 30

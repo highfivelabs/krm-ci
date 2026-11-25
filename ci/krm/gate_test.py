@@ -53,6 +53,12 @@ class Classify(unittest.TestCase):
         self.assertTrue(c.docs_only)
         self.assertEqual(c.sensitive, [])
 
+    def test_generated_code_is_still_reviewed(self):
+        for files in ([f("pkg/apis/v1/zz_generated.deepcopy.go")], [f("config/crds/a.yaml")],
+                      [f("hack/live/cassettes/x.json")], [f("docs/evil_test.go")], [f("pkg/x/testdata/a.go")],
+                      [f("README.md"), f("zz_generated.go")], [f("docs/a.md", prev="pkg/a.go")]):
+            self.assertFalse(gate.classify(files).docs_only, files)
+
     def test_sensitive_paths(self):
         for p in [".github/workflows/ci.yml", "Taskfile.yml", "go.mod", "hack/live/run.sh", "live_test.go",
                   "pkg/x/live_config_test.go", "hack/gen/generate.sh", ".claude/settings.json", "CLAUDE.md",
@@ -138,11 +144,29 @@ def run(path=gate.REVIEW_WORKFLOW, ev="pull_request_target", sha=SHA, repo="high
     return {"path": path, "event": ev, "head_sha": sha, "repository": {"full_name": repo}}
 
 
+def record(sha=SHA, state="success", sensitive=False):
+    return {"sha": sha, "state": state, "sensitive": sensitive}
+
+
 class Live(unittest.TestCase):
-    def decide(self, body=f"/ok-to-test-live sha={SHA}", ev=None, p=None, role="maintain", sts=None, rr=None, **kw):
+    def decide(self, body=f"/ok-to-test-live sha={SHA}", ev=None, p=None, role="maintain", sts=None, rr=None,
+               rec=None, **kw):
         return gate.decide_live(event=ev or event(body), pr=p or pr(), commenter_role=role,
                                 statuses=[status()] if sts is None else sts,
-                                review_run=run() if rr is None else rr, repository="highfivelabs/x", **kw)
+                                review_run=run() if rr is None else rr,
+                                review_record=record() if rec is None else rec, repository="highfivelabs/x", **kw)
+
+    def test_forged_status_without_the_runs_record(self):
+        # Any workflow can post a success status as github-actions[bot]; only
+        # a run of main's hfl-review.yml has the verdict artifact.
+        for bad in [{}, record(sha=OTHER), record(state="failure"), record(state="error")]:
+            self.assertFalse(self.decide(rec=bad).ok, bad)
+
+    def test_sensitive_from_the_record(self):
+        self.assertFalse(self.decide(rec=record(sensitive=True)).ok)
+        self.assertTrue(self.decide(f"/ok-to-test-live sha={SHA} sensitive=ok", rec=record(sensitive=True)).ok)
+        # A record that doesn't say is treated as sensitive.
+        self.assertFalse(self.decide(rec={"sha": SHA, "state": "success"}).ok)
 
     def test_review_provenance(self):
         for bad in [run(path=".github/workflows/evil.yml"), run(ev="pull_request"), run(sha=OTHER),
@@ -217,10 +241,10 @@ class Live(unittest.TestCase):
         self.assertTrue(self.decide(sts=[status(context="ci", state="failure"), status()]).ok)
 
     def test_sensitive_needs_ack(self):
-        s = [status(desc="No blocking findings; sensitive paths: 2 (needs sensitive=ok)")]
-        self.assertFalse(self.decide(sts=s).ok)
-        self.assertTrue(self.decide(f"/ok-to-test-live sha={SHA} sensitive=ok", sts=s).ok)
-        self.assertTrue(self.decide(f"/ok-to-test-live sha={SHA} kinds=A sensitive=ok", sts=s).ok)
+        s = record(sensitive=True)
+        self.assertFalse(self.decide(rec=s).ok)
+        self.assertTrue(self.decide(f"/ok-to-test-live sha={SHA} sensitive=ok", rec=s).ok)
+        self.assertTrue(self.decide(f"/ok-to-test-live sha={SHA} kinds=A sensitive=ok", rec=s).ok)
 
     def test_max_kinds(self):
         body = f"/ok-to-test-live sha={SHA} kinds=" + ",".join(f"K{i}" for i in range(11))
@@ -357,7 +381,8 @@ class CLI(unittest.TestCase):
             r = self.run_cli("live", "--event", self.write(d, "e", event(f"/ok-to-test-live sha={SHA}")),
                              "--pr", self.write(d, "p", pr()), "--role", "maintain",
                              "--statuses", self.write(d, "s", [status()]),
-                             "--review-run", self.write(d, "r", run()), "--repository", "highfivelabs/x")
+                             "--review-run", self.write(d, "r", run()),
+                             "--review-record", self.write(d, "v", record()), "--repository", "highfivelabs/x")
             self.assertEqual(r.returncode, 0, r.stdout)
             self.assertTrue(json.loads(r.stdout)["ok"])
 

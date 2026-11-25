@@ -41,6 +41,10 @@ OUTPUTS = {
 # double-quoted style reads the same way.
 QUOTED = {"setup", "check", "e2e", "sibling", "sibling_ref", "live_command", "sweep", "live_cloud"}
 RAW = {"ci_ref", "ci_tag", "free_disk", "live_timeout", "security_cron"}
+FLAGS = {"live"}
+# The header every rendered file starts with (callers/*.yml); sync only
+# deletes a file that carries it.
+RENDERED_MARK = "Rendered by highfivelabs/krm-ci ci/krm/sync.py"
 PLACEHOLDER = re.compile(r"@@\{(\w+)\}")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 CRON = re.compile(r"^[0-9*/,\- ]+$")
@@ -60,9 +64,13 @@ def load(path: str) -> list[dict]:
         if prof is None:
             raise ValueError(f"{name}: unknown profile {r.get('profile')!r}")
         merged = {**prof, **{k: v for k, v in r.items() if k != "profile"}}
-        for k in QUOTED | (RAW - {"ci_ref", "ci_tag"}):
+        for k in QUOTED | FLAGS | (RAW - {"ci_ref", "ci_tag"}):
             if k not in merged:
                 raise ValueError(f"{name}: {k} is not set (in the repository or its profile)")
+        if not isinstance(merged["live"], bool):
+            raise ValueError(f"{name}: live must be true or false")
+        if merged["live"] and not merged["live_command"]:
+            raise ValueError(f"{name}: live = true needs a live_command")
         if merged["live_cloud"] not in ("gcp", "aws", "azure", "none"):
             raise ValueError(f"{name}: live_cloud must be gcp, aws, azure or none")
         if not CRON.fullmatch(str(merged["security_cron"])):
@@ -86,10 +94,17 @@ def render(template: str, values: dict) -> str:
     return PLACEHOLDER.sub(sub, template)
 
 
+def removed(repo: dict) -> list[str]:
+    """Rendered files this repository must no longer have."""
+    return [] if repo["live"] else [OUTPUTS["hfl-live.yml"]]
+
+
 def outputs(repo: dict, ref: str, tag: str = "untagged") -> dict[str, str]:
     values = {**repo, "ci_ref": ref, "ci_tag": tag}
     out = {}
     for tmpl, dest in OUTPUTS.items():
+        if tmpl == "hfl-live.yml" and not repo["live"]:
+            continue
         with open(os.path.join(CALLERS, tmpl), encoding="utf-8") as fh:
             out[dest] = render(fh.read(), values)
     return out
@@ -145,6 +160,21 @@ def main(argv=None) -> int:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
             print(f"sync: {r['name']}: wrote {dest}")
+        for dest in removed(r):
+            path = os.path.join(root, dest)
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as fh:
+                ours = RENDERED_MARK in fh.read()
+            if not ours:
+                print(f"sync: {r['name']}: {dest} exists but was not rendered by sync; left alone")
+                continue
+            if args.check:
+                print(f"sync: {r['name']}: {dest} should not exist (live = false)")
+                drift += 1
+                continue
+            os.remove(path)
+            print(f"sync: {r['name']}: removed {dest} (live = false)")
     return 1 if drift else 0
 
 

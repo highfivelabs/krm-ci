@@ -107,7 +107,9 @@ each repository
 ```
 
 A caller pins krm-ci by commit SHA, with its tag as the comment
-(`@<sha> # v1.0.0`). A change to the baseline is a krm-ci pull request, then
+(`@<sha> # v1.0.0`). The `uses:` pin and the `ci-ref` input must move
+together, so only sync moves them; the rendered `dependabot.yml` ignores
+krm-ci. A change to the baseline is a krm-ci pull request, then
 a tag, then `task krm:sync -- --tag vX.Y.Z`. That opens
 one small pin-move pull request per repository, which runs the new baseline
 before it merges. No repository changes without its own CI passing on the
@@ -123,8 +125,22 @@ the same on a laptop, on an offload VM and in CI:
 | `setup` | `task tools` | none |
 | `check` (hermetic) | `task check` | generate, build, vet (including `-tags live`), `go test` |
 | `e2e` | `task operator-e2e` | none |
-| `live_command` | `task test-live …` | `go test -tags live -run TestEveryKindLive` |
-| `sweep` | `task live-sweep RUN=$LIVE_RUN_ID` | none yet (see section 10) |
+| `live_command` | none until the migration | `go test -tags live -run TestEveryKindLive` |
+| `sweep` | none yet | none yet (see section 10) |
+| `live` (render `hfl-live.yml`) | **off** until the migration | on |
+
+Live is off for the operator repositories and krm-rest-runtime, so their
+`hfl-live.yml` is not rendered. The operator repositories' run scripts make
+their own run IDs (`cce-…`, `ackx-…`) and sweep by those, not by
+`LIVE_RUN_ID`, and today they get their credentials on offload VMs. Each
+migration PR wires the contract:
+- everything the live command makes is named or tagged with
+  `LIVE_RUN_ID`;
+- `sweep` deletes what carries it;
+- credentials come from the `live` environment's federation.
+
+krm-rest-runtime has no live run of its own; the vendor repositories' live
+runs exercise it.
 
 After `check`, the baseline fails if the working tree changed: generated
 files, CRDs and coverage outputs must be committed.
@@ -194,7 +210,13 @@ workflow the secrets, so it has to be treated as the dangerous part:
 - The job that holds the model credential has no write access to GitHub.
   The job that writes (`post`) runs no model and none of the PR's code.
 - Generated-file globs (`.review-generated`) are read from the **base**
-  commit. Otherwise a PR could declare itself generated and skip review.
+  commit. Otherwise a PR could declare itself generated and slip past the
+  size limit.
+- Generated files only stay out of the size count; they are still
+  reviewed. `zz_generated*.go` compiles into the live binary like any
+  other code. Only a PR made entirely of documentation, judged by file
+  type (`.md`, images, `LICENSE`, `NOTICE`) and never by directory,
+  skips the model review.
 - The prompt treats everything in the checkout as untrusted data. An
   instruction aimed at the reviewer is itself a `critical` finding
   (`prompt_injection`).
@@ -239,17 +261,28 @@ A live run is the only place a PR's code meets a credential. It needs
    edit), from a user whose role is `admin` or `maintain` (not a bot), must
    be `/ok-to-test-live sha=<40-hex head> [kinds=A,B] [sensitive=ok]`. The
    SHA must be the current head. A push afterwards needs a new command.
-2. **The review passed on that SHA.** gate.py checks four things:
+2. **The review passed on that SHA.** A status alone proves little: any
+   workflow in the repository, including one on a branch pushed by
+   someone with write access, can post `hfl/security-review: success` as
+   `github-actions[bot]`. So gate.py checks five things:
    - the `hfl/security-review` status is `success`;
    - it was posted by `github-actions[bot]`;
    - its run is the repository's own `.github/workflows/hfl-review.yml`,
-     triggered by `pull_request_target`, for that SHA. That trigger always
-     runs the default branch's copy of the workflow, so a PR can't forge
-     the status from its own workflow;
-   - if the review found **sensitive paths** (CI, Taskfiles, hack scripts,
-     the live harness, `go.mod`/`go.sum`, Dockerfiles, agent configs, the
-     lint and gitleaks configs), the command also carries `sensitive=ok`,
-     as the maintainer's statement that they read those files.
+     triggered by `pull_request_target` or `issue_comment`. Both triggers
+     always run the default branch's copy of the workflow, never a PR's;
+   - **the review run's own artifact `hfl-review-verdict`** (written by
+     its post job) says `success`. Only a run of main's review workflow
+     can carry that artifact. The gate doesn't follow the status's link to
+     find the run, since a forged status could point at an older run that
+     passed before a newer one failed. It lists the review workflow's
+     completed runs and takes the **newest** one whose record names this
+     SHA;
+   - if the record says the change touches **sensitive paths** (CI,
+     Taskfiles, hack scripts, the live harness, `go.mod`/`go.sum`,
+     Dockerfiles, agent configs, the lint and gitleaks configs), the
+     command also carries `sensitive=ok`, as the maintainer's statement
+     that they read those files. A record that doesn't say counts as
+     sensitive.
 3. **The `live` environment's approval.** The job runs in the GitHub
    environment `live`, which has required reviewers. The cloud trusts only
    that environment (below), so a token from any other job is useless.
@@ -356,5 +389,8 @@ the same environment.
    clean up after themselves, but a killed job leaves whatever it made. Add
    a `live:sweep` task to the vendor template, as gitlab, grafana and vault
    have.
-4. **The operator repos' live commands** in `repos.toml` follow their
-   current `task test-live` usage. Check each one in its migration PR.
+4. **The operator repos' live commands.** `repos.toml` has none for them
+   yet (`live = false`). Each migration PR adds the `live_command` and
+   `sweep` that keep the `LIVE_RUN_ID` contract (section 3), then sets
+   `live = true`. Turning `live` off later removes the rendered
+   `hfl-live.yml` on the next sync, and `--check` reports it until then.

@@ -22,6 +22,10 @@ updates:
     open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
+    # The krm-ci pin moves only through krm-ci's sync.py, which moves
+    # `uses:` and `ci-ref:` together; Dependabot would move `uses:` alone.
+    ignore:
+      - dependency-name: "highfivelabs/krm-ci*"
     schedule:
       interval: weekly
     cooldown:
