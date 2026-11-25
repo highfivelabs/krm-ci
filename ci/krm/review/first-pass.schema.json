@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {"type": "string", "maxLength": 1500},
+    "findings": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "title", "file", "line", "detail"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["blocking", "should_fix", "nit"]},
+          "title": {"type": "string", "maxLength": 200},
+          "file": {"type": "string"},
+          "line": {"type": "integer"},
+          "detail": {"type": "string", "maxLength": 2000}
+        }
+      }
+    }
+  }
+}

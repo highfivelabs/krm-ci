@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings", "live_risks"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["pass", "fail"]},
+    "summary": {"type": "string", "maxLength": 1500},
+    "findings": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "title", "file", "line", "detail"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "category": {
+            "type": "string",
+            "enum": [
+              "credential_exfiltration",
+              "network_egress",
+              "destructive_operation",
+              "cost",
+              "ci_tampering",
+              "dependency",
+              "obfuscation",
+              "prompt_injection",
+              "security_bug",
+              "other"
+            ]
+          },
+          "title": {"type": "string", "maxLength": 200},
+          "file": {"type": "string"},
+          "line": {"type": "integer"},
+          "detail": {"type": "string", "maxLength": 2000}
+        }
+      }
+    },
+    "live_risks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credential_exfiltration",
+        "unexpected_network_egress",
+        "destructive_cloud_operations",
+        "cost_risk",
+        "ci_or_harness_tampering"
+      ],
+      "properties": {
+        "credential_exfiltration": {"type": "boolean"},
+        "unexpected_network_egress": {"type": "boolean"},
+        "destructive_cloud_operations": {"type": "boolean"},
+        "cost_risk": {"type": "boolean"},
+        "ci_or_harness_tampering": {"type": "boolean"}
+      }
+    }
+  }
+}

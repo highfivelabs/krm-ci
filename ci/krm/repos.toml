@@ -1,0 +1,154 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every repository on the KRM CI baseline (docs/krm-ci.md), and what is
+# particular to it. ci/krm/sync.py renders each one's caller workflows
+# (.github/workflows/hfl-*.yml) and .github/dependabot.yml from
+# ci/krm/callers/ with these values. Adding a repository is one [[repo]]
+# entry (Amazon's ACK onboards a controller with one line the same way).
+#
+# A repository takes its profile's values; its own keys override them.
+#
+#   check, setup, e2e       commands run by krm-ci.yml (bash, in the checkout)
+#   free_disk, sibling,     see krm-ci.yml's inputs
+#   sibling_ref
+#   live_cloud              gcp | aws | azure | none (a local sandbox)
+#   live_command, sweep     run by krm-live.yml; KRM_LIVE_KINDS, LIVE_RUN_ID set
+#   live_timeout            minutes
+#   security_cron           the weekly scan's schedule, spread so the
+#                           repositories don't all run at once
+#
+# Live runs stay off in a repository until its variable HFL_LIVE_ENABLED is
+# 'true': set it once the cloud trusts the repository's `live` environment
+# (docs/krm-ci.md, "Cloud trust").
+
+[profile.vendor]
+setup = ""
+check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" install -q pyyaml==6.0.3 && export PATH="${RUNNER_TEMP}/py/bin:${PATH}" && hack/gen/generate.sh && go build ./... && go vet ./... && go vet -tags live ./... && go test ./...'''
+e2e = ""
+free_disk = false
+sibling = "krm-rest-runtime"
+sibling_ref = "v0.19.0"
+live_cloud = "gcp"
+live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
+sweep = ""
+live_timeout = 45
+
+[profile.operator]
+setup = "task tools"
+check = "task check"
+e2e = "task operator-e2e"
+free_disk = true
+sibling = ""
+sibling_ref = ""
+live_timeout = 60
+sweep = "task live-sweep RUN=\"${LIVE_RUN_ID}\""
+
+[profile.runtime]
+setup = ""
+check = "go build ./... && go vet ./... && go test ./..."
+e2e = ""
+free_disk = false
+sibling = ""
+sibling_ref = ""
+live_cloud = "gcp"
+live_command = "task live"
+sweep = ""
+live_timeout = 30
+
+[[repo]]
+name = "config-connector-extensions"
+profile = "operator"
+live_cloud = "gcp"
+live_command = 'task test-live PROJECT="${HFL_LIVE_TARGET}" KINDS="${KRM_LIVE_KINDS//,/ }"'
+sweep = 'task live-sweep PROJECT="${HFL_LIVE_TARGET}" RUN="${LIVE_RUN_ID}"'
+security_cron = "40 7 * * 1"
+
+[[repo]]
+name = "ack-extensions"
+profile = "operator"
+live_cloud = "aws"
+live_command = 'ACK_EXT_LIVE=create-real-aws-resources task test-live ACCOUNT="${HFL_LIVE_TARGET}" ROLE_ARN="${HFL_LIVE_ROLE_ARN}" TESTS="${KRM_LIVE_KINDS//,/ }"'
+security_cron = "40 8 * * 1"
+
+[[repo]]
+name = "aso-extensions"
+profile = "operator"
+live_cloud = "azure"
+live_command = 'ASO_EXT_LIVE=create-real-azure-resources task test-live TESTS="${KRM_LIVE_KINDS//,/ }"'
+sweep = ""
+security_cron = "40 9 * * 1"
+
+[[repo]]
+name = "krm-rest-runtime"
+profile = "runtime"
+security_cron = "10 6 * * 2"
+
+[[repo]]
+name = "cloudflare-krm-extensions"
+profile = "vendor"
+security_cron = "20 6 * * 2"
+
+[[repo]]
+name = "confluent-krm-extensions"
+profile = "vendor"
+security_cron = "30 6 * * 2"
+
+[[repo]]
+name = "datadog-krm-extensions"
+profile = "vendor"
+security_cron = "40 6 * * 2"
+
+[[repo]]
+name = "github-krm-extensions"
+profile = "vendor"
+security_cron = "50 6 * * 2"
+
+[[repo]]
+name = "gitlab-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:gitlab && task live:gitlab"
+sweep = "task live:sandbox:gitlab:down"
+security_cron = "10 7 * * 2"
+
+[[repo]]
+name = "grafana-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:grafana && task live:grafana"
+sweep = "task live:sandbox:grafana:down"
+security_cron = "20 7 * * 2"
+
+[[repo]]
+name = "mongodbatlas-krm-extensions"
+profile = "vendor"
+security_cron = "30 7 * * 2"
+
+[[repo]]
+name = "okta-krm-extensions"
+profile = "vendor"
+security_cron = "40 7 * * 2"
+
+[[repo]]
+name = "pagerduty-krm-extensions"
+profile = "vendor"
+security_cron = "50 7 * * 2"
+
+[[repo]]
+name = "sentry-krm-extensions"
+profile = "vendor"
+security_cron = "10 8 * * 2"
+
+[[repo]]
+name = "snowflake-krm-extensions"
+profile = "vendor"
+security_cron = "20 8 * * 2"
+
+[[repo]]
+name = "vault-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:vault && task live:vault"
+sweep = "task live:sandbox:vault:down"
+security_cron = "30 8 * * 2"

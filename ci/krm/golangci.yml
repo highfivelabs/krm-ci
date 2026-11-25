@@ -1,0 +1,49 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# The KRM CI baseline's golangci-lint configuration (docs/krm-ci.md). A
+# repository with its own .golangci.yml uses that instead; it should start
+# from this one. The set is the overlap of what Azure Service Operator and
+# Config Connector enable that bears on controllers: correctness and
+# security first, no style-only linters (gofmt is checked separately).
+version: "2"
+
+run:
+  timeout: 15m
+  tests: true
+  build-tags: [live]
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bidichk # trojan-source Unicode
+    - bodyclose
+    - errorlint
+    - gosec
+    - nilerr
+    - noctx
+    - misspell
+    - copyloopvar
+  settings:
+    gosec:
+      excludes:
+        - G101 # "hardcoded credentials": every test fixture's field names
+        - G115 # integer conversions: generated code is full of them
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+  exclusions:
+    generated: lax
+    presets: [common-false-positives, std-error-handling]
+    paths:
+      - third_party/
+      - zz_generated
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose]
+
+issues:
+  # A pull request is judged on what it changes (new-from-merge-base, set
+  # by the workflow); the nightly run reports everything.
+  max-issues-per-linter: 0
+  max-same-issues: 0

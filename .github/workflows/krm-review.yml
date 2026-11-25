@@ -1,0 +1,319 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Automated review of a pull request by Claude (docs/krm-ci.md, "The
+# review"), called from each repository's hfl-review.yml on
+# pull_request_target and on issue_comment:
+#
+#   admit   decides whether this pull request is reviewed now (gate.py
+#           admit). A model review costs money, so only organisation members
+#           (OWNER, MEMBER) are reviewed on their own pushes. Anyone else's
+#           pull request gets the status hfl/security-review "pending:
+#           waiting for /review" until a maintainer (role write, maintain or
+#           admin) comments `/review`, once per head they want reviewed.
+#           Nobody outside the organisation can spend the review budget.
+#   review  reads the pull request **as data**, never running any of it.
+#           The head is checked out into pr/ with no credentials, its agent
+#           configuration (.claude/, .mcp.json) deleted, and Claude Code
+#           runs with --bare, no setting sources, read-only tools confined to
+#           the checkout, no shell and no network tools. It runs two passes:
+#             security    (blocking for live runs) ci/krm/review/security.md
+#             first-pass  (advisory)               ci/krm/review/first-pass.md
+#           The outputs are redacted before they leave the job. The job
+#           holds the model credential but can't write to GitHub.
+#   post    can write, but runs no model and none of the pull request's
+#           code: gate.py turns the security output into the commit status
+#           (it passes only on a well-formed pass verdict with no critical
+#           or high finding and no live risk), and keeps one comment updated.
+#
+# The review is required for, but never enough for, a live run: live runs
+# also need a maintainer's /ok-to-test-live on the exact commit and the live
+# environment's approval (krm-live.yml).
+name: krm-review
+
+on:
+  workflow_call:
+    inputs:
+      ci-ref:
+        description: The commit of highfivelabs/krm-ci this workflow is called at (the same SHA as in `uses:`)
+        type: string
+        required: true
+      security-model:
+        type: string
+        default: claude-opus-5-5
+      first-pass-model:
+        description: Empty to skip the advisory first pass
+        type: string
+        default: claude-sonnet-5-5
+      max-budget-usd:
+        description: The most each pass may spend (claude --max-budget-usd)
+        type: string
+        default: "3"
+      max-changed-lines:
+        description: A bigger change, outside generated files, is not reviewed automatically (split it)
+        type: number
+        default: 4000
+      claude-code-version:
+        type: string
+        default: 2.1.331
+      auto-review-associations:
+        description: Authors whose own pushes are reviewed without a /review (GitHub author_association values)
+        type: string
+        default: OWNER,MEMBER
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions: {}
+
+env:
+  CONTEXT: hfl/security-review
+
+jobs:
+  admit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+      statuses: write
+    outputs:
+      run: ${{ steps.admit.outputs.run }}
+      number: ${{ steps.admit.outputs.number }}
+      sha: ${{ steps.admit.outputs.sha }}
+      head-repo: ${{ steps.admit.outputs.head-repo }}
+      base-sha: ${{ steps.admit.outputs.base-sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          USER: ${{ github.event.comment.user.login }}
+          AUTO: ${{ inputs.auto-review-associations }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          t="${RUNNER_TEMP}"
+          gh api "repos/${REPO}/pulls/${NUMBER}" > "${t}/pr.json"
+          role=""
+          if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
+            role="$(gh api "repos/${REPO}/collaborators/${USER}/permission" --jq .role_name 2>/dev/null || echo none)"
+          fi
+          python3 -I .hfl-ci/ci/krm/gate.py admit --event-name "${EVENT_NAME}" --event "${GITHUB_EVENT_PATH}" \
+            --pr "${t}/pr.json" --role "${role}" --auto "${AUTO}" > "${t}/admit.json"
+          cat "${t}/admit.json"
+          jq -r '"run=\(.run)", "number=\(.number)", "sha=\(.sha)", "head-repo=\(.head_repo)", "base-sha=\(.base_sha)"' \
+            "${t}/admit.json" >> "${GITHUB_OUTPUT}"
+          jq -r .reason "${t}/admit.json" >> "${GITHUB_STEP_SUMMARY}"
+          sha="$(jq -r .sha "${t}/admit.json")"
+          if jq -e .run "${t}/admit.json" > /dev/null; then
+            desc="Reviewing"
+          elif jq -e .wait "${t}/admit.json" > /dev/null; then
+            desc="Waiting for a maintainer to comment /review"
+          else
+            exit 0
+          fi
+          gh api -X POST "repos/${REPO}/statuses/${sha}" -f state=pending -f context="${CONTEXT}" \
+            -f description="${desc}" -f target_url="${RUN_URL}" > /dev/null
+
+  review:
+    needs: admit
+    if: needs.admit.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+
+      # The pull request's head, as data. Nothing in it is run, built or
+      # sourced by this job; see the header.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 zizmor: ignore[dangerous-triggers]
+        with:
+          repository: ${{ needs.admit.outputs.head-repo }}
+          ref: ${{ needs.admit.outputs.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: The change, from the API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ needs.admit.outputs.number }}
+          BASE: ${{ needs.admit.outputs.base-sha }}
+        run: |
+          set -euo pipefail
+          rm -rf pr/.git pr/.claude pr/.mcp.json pr/.hfl-review
+          mkdir -p pr/.hfl-review
+          gh api --paginate "repos/${REPO}/pulls/${NUMBER}/files" --jq '.[]' | jq -s . > pr/.hfl-review/files.json
+          gh api "repos/${REPO}/pulls/${NUMBER}" -H "Accept: application/vnd.github.diff" > pr/.hfl-review/diff.patch || true
+          gh api "repos/${REPO}/pulls/${NUMBER}" --jq '{title, body, user: .user.login, author_association, base: .base.ref, head_repo: .head.repo.full_name}' > pr/.hfl-review/pr.json
+          # The generated-file globs come from the base branch, never the
+          # pull request: otherwise it could call itself generated and skip
+          # review.
+          gh api "repos/${REPO}/contents/.review-generated?ref=${BASE}" -H "Accept: application/vnd.github.raw" \
+            > "${RUNNER_TEMP}/review-generated" 2>/dev/null || : > "${RUNNER_TEMP}/review-generated"
+
+      - name: Classify
+        id: classify
+        env:
+          MAX: ${{ inputs.max-changed-lines }}
+        run: |
+          set -euo pipefail
+          python3 -I .hfl-ci/ci/krm/gate.py classify --files pr/.hfl-review/files.json \
+            --generated "${RUNNER_TEMP}/review-generated" > classify.json
+          cp classify.json pr/.hfl-review/classify.json
+          cat classify.json
+          mode=review
+          if jq -e '.docs_only or (.reviewable | not)' classify.json > /dev/null; then
+            mode=skip
+          elif (( $(jq .changed_lines classify.json) > MAX )); then
+            mode=too-large
+          fi
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+
+      - name: Claude Code
+        if: steps.classify.outputs.mode == 'review'
+        env:
+          VERSION: ${{ inputs.claude-code-version }}
+        # An exact version (inputs.claude-code-version); npm checks the
+        # tarball against the registry's integrity hash.
+        run: npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${VERSION}" # zizmor: ignore[adhoc-packages]
+
+      - name: Security review
+        if: steps.classify.outputs.mode == 'review'
+        working-directory: pr
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL: ${{ inputs.security-model }}
+          BUDGET: ${{ inputs.max-budget-usd }}
+        run: |
+          set -uo pipefail
+          k=../.hfl-ci/ci/krm/review
+          timeout 25m claude -p --bare --setting-sources "" --settings "${k}/settings.json" --strict-mcp-config \
+            --tools "Read,Grep,Glob" --permission-mode dontAsk --model "${MODEL}" --max-budget-usd "${BUDGET}" \
+            --output-format json --json-schema "$(cat "${k}/security.schema.json")" \
+            "$(cat "${k}/security.md")" > ../security.json 2> ../security.err || echo "claude exited $?"
+          python3 -I ../.hfl-ci/ci/krm/gate.py redact --file ../security.json \
+            --redact-env CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
+
+      - name: First-pass review
+        if: steps.classify.outputs.mode == 'review' && inputs.first-pass-model != ''
+        working-directory: pr
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL: ${{ inputs.first-pass-model }}
+          BUDGET: ${{ inputs.max-budget-usd }}
+        run: |
+          set -uo pipefail
+          k=../.hfl-ci/ci/krm/review
+          timeout 15m claude -p --bare --setting-sources "" --settings "${k}/settings.json" --strict-mcp-config \
+            --tools "Read,Grep,Glob" --permission-mode dontAsk --model "${MODEL}" --max-budget-usd "${BUDGET}" \
+            --output-format json --json-schema "$(cat "${k}/first-pass.schema.json")" \
+            "$(cat "${k}/first-pass.md")" > ../first-pass.json 2> /dev/null || echo "claude exited $?"
+          python3 -I ../.hfl-ci/ci/krm/gate.py redact --file ../first-pass.json \
+            --redact-env CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
+
+      - name: Cost
+        if: steps.classify.outputs.mode == 'review'
+        run: |
+          for f in security.json first-pass.json; do
+            [[ -f "${f}" ]] && jq -r --arg f "${f}" '"\($f): $\(.total_cost_usd // 0) \(.subtype // "no result")"' "${f}" >> "${GITHUB_STEP_SUMMARY}" || true
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: hfl-review
+          path: |
+            classify.json
+            security.json
+            first-pass.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  post:
+    needs: [admit, review]
+    if: always() && needs.admit.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: hfl-review
+          path: out
+      - name: Status and comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ needs.admit.outputs.number }}
+          SHA: ${{ needs.admit.outputs.sha }}
+          MODE: ${{ needs.review.outputs.mode }}
+          REVIEW: ${{ needs.review.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gate=.hfl-ci/ci/krm/gate.py
+          mkdir -p out
+          [[ -f out/classify.json ]] || echo '{}' > out/classify.json
+          case "${MODE}:${REVIEW}" in
+            skip:success)
+              state=success desc="Docs only: nothing to review"; post_comment=false ;;
+            too-large:success)
+              state=failure desc="Too large to review automatically: split it, or a maintainer reviews it by hand"; post_comment=false ;;
+            review:success)
+              python3 -I "${gate}" verdict --claude out/security.json --classify out/classify.json > verdict.json || true
+              state="$(jq -r .state verdict.json)" desc="$(jq -r .description verdict.json)"; post_comment=true ;;
+            *)
+              state=error desc="The review did not run to the end (${REVIEW})"; post_comment=false ;;
+          esac
+          gh api -X POST "repos/${REPO}/statuses/${SHA}" -f state="${state}" -f context=hfl/security-review \
+            -f description="${desc:0:140}" -f target_url="${RUN_URL}" > /dev/null
+          echo "${state}: ${desc}" >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${post_comment}" == "true" ]]; then
+            fp=()
+            [[ -f out/first-pass.json ]] && fp=(--first-pass out/first-pass.json)
+            python3 -I "${gate}" comment --sha "${SHA}" --verdict verdict.json --classify out/classify.json \
+              "${fp[@]}" --run-url "${RUN_URL}" > comment.md
+            id="$(gh api --paginate "repos/${REPO}/issues/${NUMBER}/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- hfl-krm-review -->"))) | .id' | head -n 1)"
+            if [[ -n "${id}" ]]; then
+              gh api -X PATCH "repos/${REPO}/issues/comments/${id}" -F body=@comment.md > /dev/null
+            else
+              gh api -X POST "repos/${REPO}/issues/${NUMBER}/comments" -F body=@comment.md > /dev/null
+            fi
+          fi
+

@@ -1,0 +1,282 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Live tests of a pull request against a real test account (docs/krm-ci.md,
+# "Live runs"), called from each repository's hfl-live.yml on
+# issue_comment. Three locks, all on the same commit:
+#
+#   1. A maintainer (role admin or maintain) comments, as the comment's
+#      first line:  /ok-to-test-live sha=<full head SHA> [kinds=A,B] [sensitive=ok]
+#   2. hfl/security-review is success on that SHA, posted by the base
+#      repository's hfl-review.yml run on pull_request_target (so the pull
+#      request can't have written it). A change to the build, harness, CI
+#      or dependencies needs sensitive=ok as well.
+#   3. The job's GitHub environment (inputs.environment) has required
+#      reviewers, and the cloud trusts only that environment: the Workload
+#      Identity Federation provider or IAM role admits tokens whose
+#      `environment` claim is it (docs/krm-ci.md, "Cloud trust").
+#
+# gate.py checks 1 and 2 (ci/krm/gate.py live). The head is checked again
+# after the environment approval, just before checkout, and the checkout is
+# of the SHA itself: a push after approval means a new command.
+#
+# Cost: one live run at a time per repository (concurrency), a timeout, at
+# most max-kinds kinds per command, and the sweep always runs afterwards.
+# Nothing the live run writes is uploaded (logs could hold credentials;
+# GitHub masks only the secrets it knows about).
+name: krm-live
+
+on:
+  workflow_call:
+    inputs:
+      ci-ref:
+        type: string
+        required: true
+      environment:
+        description: The GitHub environment that holds the live credentials' trust (required reviewers on)
+        type: string
+        default: live
+      setup-command:
+        type: string
+        default: ""
+      live-command:
+        description: Runs the live tests. KRM_LIVE=1, KRM_LIVE_KINDS (comma-separated, empty for the repository's default) and LIVE_RUN_ID are set.
+        type: string
+        required: true
+      sweep-command:
+        description: Deletes what LIVE_RUN_ID created, whatever happened; always runs
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 45
+      max-kinds:
+        type: number
+        default: 10
+      allowed-roles:
+        type: string
+        default: admin,maintain
+      target:
+        description: The test project, account or subscription (HFL_LIVE_TARGET in the live command's environment)
+        type: string
+        default: ""
+      cloud:
+        description: How the job gets credentials - gcp, aws, azure or none
+        type: string
+        default: gcp
+      gcp-workload-identity-provider:
+        type: string
+        default: ""
+      gcp-service-account:
+        type: string
+        default: ""
+      aws-role-arn:
+        type: string
+        default: ""
+      aws-region:
+        type: string
+        default: us-west-2
+      azure-client-id:
+        type: string
+        default: ""
+      azure-tenant-id:
+        type: string
+        default: ""
+      azure-subscription-id:
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: read
+      statuses: read
+    outputs:
+      ok: ${{ steps.gate.outputs.ok }}
+      sha: ${{ steps.gate.outputs.sha }}
+      kinds: ${{ steps.gate.outputs.kinds }}
+      head-repo: ${{ steps.gate.outputs.head-repo }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          USER: ${{ github.event.comment.user.login }}
+          ROLES: ${{ inputs.allowed-roles }}
+          MAX_KINDS: ${{ inputs.max-kinds }}
+        run: |
+          set -euo pipefail
+          t="${RUNNER_TEMP}"
+          gh api "repos/${REPO}/pulls/${NUMBER}" > "${t}/pr.json"
+          head="$(jq -r .head.sha "${t}/pr.json")"
+          role="$(gh api "repos/${REPO}/collaborators/${USER}/permission" --jq .role_name 2>/dev/null || echo none)"
+          gh api "repos/${REPO}/commits/${head}/statuses?per_page=100" > "${t}/statuses.json"
+          url="$(jq -r '[.[] | select(.context == "hfl/security-review")][0].target_url // ""' "${t}/statuses.json")"
+          echo '{}' > "${t}/run.json"
+          if [[ "${url}" =~ ^https://github\.com/${REPO}/actions/runs/([0-9]+)$ ]]; then
+            gh api "repos/${REPO}/actions/runs/${BASH_REMATCH[1]}" > "${t}/run.json" || echo '{}' > "${t}/run.json"
+          fi
+          python3 -I .hfl-ci/ci/krm/gate.py live --event "${GITHUB_EVENT_PATH}" --pr "${t}/pr.json" \
+            --role "${role}" --statuses "${t}/statuses.json" --review-run "${t}/run.json" \
+            --repository "${REPO}" --allowed-roles "${ROLES}" --max-kinds "${MAX_KINDS}" > "${t}/decision.json" || true
+          cat "${t}/decision.json"
+          jq -r '"ok=\(.ok)", "sha=\(.sha)", "kinds=\(.kinds | join(","))"' "${t}/decision.json" >> "${GITHUB_OUTPUT}"
+          echo "head-repo=$(jq -r .head.repo.full_name "${t}/pr.json")" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### Live run gate"
+            jq -r 'if .ok then "Admitted: \(.sha) kinds=\(.kinds | join(",") | if . == "" then "(default)" else . end)" else "Refused:\n" + (.reasons | map("- " + .) | join("\n")) end' "${t}/decision.json"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          jq -r '.reasons | join("\n")' "${t}/decision.json" > "${t}/reasons.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hfl-live-gate
+          path: ${{ runner.temp }}/reasons.txt
+          retention-days: 3
+
+  live:
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: hfl-live-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+    defaults:
+      run:
+        working-directory: src/${{ github.event.repository.name }}
+    steps:
+      - name: The head is still the approved commit
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          head="$(gh api "repos/${REPO}/pulls/${NUMBER}" --jq .head.sha)"
+          if [[ "${head}" != "${SHA}" ]]; then
+            echo "::error::the head moved to ${head} after approval of ${SHA}: approve the new head"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.gate.outputs.head-repo }}
+          ref: ${{ needs.gate.outputs.sha }}
+          path: src/${{ github.event.repository.name }}
+          persist-credentials: false
+      - name: The checkout is the approved commit
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "${SHA}"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/${{ github.event.repository.name }}/go.mod
+          cache: false # a pull request's run must not write a cache main later reads
+      - uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+        with:
+          version: 3.54.0
+          repo-token: ${{ github.token }}
+      - if: inputs.setup-command != ''
+        env:
+          CMD: ${{ inputs.setup-command }}
+        run: bash -euo pipefail -c "${CMD}"
+
+      - if: inputs.cloud == 'gcp'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+          service_account: ${{ inputs.gcp-service-account }}
+      - if: inputs.cloud == 'gcp'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - if: inputs.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.aws-role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+          role-duration-seconds: 3600
+          role-session-name: hfl-live-${{ github.run_id }}
+      - if: inputs.cloud == 'azure'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: Live tests
+        env:
+          CMD: ${{ inputs.live-command }}
+          KRM_LIVE: "1"
+          KRM_LIVE_KINDS: ${{ needs.gate.outputs.kinds }}
+          LIVE_RUN_ID: hfl-${{ github.run_id }}-${{ github.run_attempt }}
+          LIVE_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          HFL_LIVE_TARGET: ${{ inputs.target }}
+          HFL_LIVE_ROLE_ARN: ${{ inputs.aws-role-arn }}
+        run: bash -euo pipefail -c "${CMD}"
+      - name: Sweep
+        if: always() && inputs.sweep-command != ''
+        env:
+          CMD: ${{ inputs.sweep-command }}
+          LIVE_RUN_ID: hfl-${{ github.run_id }}-${{ github.run_attempt }}
+          HFL_LIVE_TARGET: ${{ inputs.target }}
+        run: bash -euo pipefail -c "${CMD}"
+
+  report:
+    needs: [gate, live]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: hfl-live-gate
+          path: gate
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          OK: ${{ needs.gate.outputs.ok }}
+          SHA: ${{ needs.gate.outputs.sha }}
+          LIVE: ${{ needs.live.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "${OK}" != "true" ]]; then
+            {
+              echo "Live run refused:"
+              echo
+              sed 's/^/- /; s/@/@\xe2\x80\x8b/g' gate/reasons.txt 2>/dev/null || echo "- the gate did not finish"
+              echo
+              echo "[Run](${RUN_URL})"
+            } > body.md
+            gh api -X POST "repos/${REPO}/issues/${NUMBER}/comments" -F body=@body.md > /dev/null
+            exit 0
+          fi
+          case "${LIVE}" in success) state=success ;; failure) state=failure ;; *) state=error ;; esac
+          gh api -X POST "repos/${REPO}/statuses/${SHA}" -f state="${state}" -f context=hfl/live \
+            -f description="Live tests: ${LIVE}" -f target_url="${RUN_URL}" > /dev/null
+          tick='`'
+          echo "Live tests on ${tick}${SHA:0:12}${tick}: **${LIVE}**. [Run](${RUN_URL})" > body.md
+          gh api -X POST "repos/${REPO}/issues/${NUMBER}/comments" -F body=@body.md > /dev/null
