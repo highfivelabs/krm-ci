@@ -202,7 +202,7 @@ jobs:
         env:
           SHA: ${{ needs.gate.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "${SHA}"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: src/${{ github.event.repository.name }}/go.mod
           cache: false # a pull request's run must not write a cache main later reads
