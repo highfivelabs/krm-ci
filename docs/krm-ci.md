@@ -149,7 +149,7 @@ token. Nothing in the workflow asks for more.
 
 | Job | Checks | Blocks on |
 | --- | --- | --- |
-| `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes; a reachable vulnerability that is new in the PR's head |
+| `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes (on a push to `main`, in the commits pushed); a reachable vulnerability that is new in the PR's head or the push |
 | `test` | no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header in the repository's own files (`taskfiles/licenses.yml`); the repository's hermetic check; every Go module linked into `licenses_packages` under an accepted licence (on a push, or a PR that changes `go.mod`); "the working tree is clean" | a copyleft or source-available header; a module outside the accepted set and not reviewed in `.licenses-allow.txt`; failure or drift |
 | `e2e` | kind end to end, if the repository has one | failure |
 | `ci` | the gatekeeper | anything above failed or was cancelled (skipped is fine) |

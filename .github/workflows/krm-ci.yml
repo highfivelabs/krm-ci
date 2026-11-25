@@ -129,12 +129,21 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          # A pull request is judged on what it adds over its merge base; a
+          # push on what it pushed (before..after), like a pull request.
+          # What is already there is the weekly security workflow's to
+          # report (krm-security.yml), so main does not go red on old
+          # findings. A push with no usable before (a new branch, a forced
+          # push whose old head is gone) is judged whole.
+          base=""
           if [[ "${EVENT}" == "pull_request" ]]; then
             base="$(git merge-base "${BASE}" "${HEAD}")"
-          else
-            base=""
+          elif [[ "${EVENT}" == "push" && -n "${BEFORE}" && ! "${BEFORE}" =~ ^0+$ ]] \
+            && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            base="${BEFORE}"
           fi
           echo "base=${base}" >> "${GITHUB_OUTPUT}"
 
