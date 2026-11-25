@@ -30,5 +30,6 @@ jobs:
       check-command: @@{check}
       e2e-command: @@{e2e}
       free-disk: @@{free_disk}
+      timeout-minutes: @@{timeout}
       sibling-repo: @@{sibling}
       sibling-ref: @@{sibling_ref}

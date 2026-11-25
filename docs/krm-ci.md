@@ -357,12 +357,23 @@ the same environment.
    - tf-infra created it (`terragrunt/prod/github`), and the code moved
      here from factory with its history. Done.
    - Tag `v1.0.0`.
-   - The shared Taskfile include (factory's `taskfiles/`) has the same
-     problem: a fork's PR can't fetch it from private factory. Move it
-     here too, or vendor it into each repository.
+   - The shared Taskfile include moved here too (`taskfiles/`, krm-ci
+     v1.1.0), so a fork's PR fetches it with no credentials.
 4. **At launch, per repository.**
-   - Run `task krm:sync -- --tag v1.0.0 --only <repo>`, delete its
-     old `ci.yml`/`nightly.yml`, set the variables, and require `ci`.
+   - Run `task krm:sync -- --tag vX.Y.Z --only <repo>`, delete its
+     old `ci.yml`, set the variables, and require `ci`.
+   - Vendor repositories: `hack/ci.sh` stays the check (`hfl-ci.yml` runs
+     it with `RUNTIME` at the sibling checkout) and reads its runtime pin
+     from `hfl-ci.yml`'s `sibling-ref`. `live.yml`, the maintainer-started
+     re-record, stays until `hfl-live.yml` is switched on.
+   - `krm-rest-runtime`: `hack/ci.sh` too; `live-rerecord.yml` stays (the
+     vendor repositories' `live.yml` calls it).
+   - Operator repositories: `hack/ci/pr.sh check|e2e` keeps their
+     selective runs (`hack/ci/select.sh` on BASE_SHA..HEAD_SHA; a push runs
+     everything), on GitHub's runners now that the repositories are public.
+     Their Taskfile include moves to krm-ci's `taskfiles/`, so the factory
+     App (`factory-access`) goes, and with it the reason a fork's pull
+     request failed. `nightly.yml` and `release.yml` stay.
    - Start with `cloudflare-krm-extensions`, the smallest repository that
      has a live run, then the other vendor repos, `krm-rest-runtime`, and
      the operator repos last.
