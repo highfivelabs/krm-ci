@@ -12,6 +12,10 @@
 #   test   the repository's own hermetic check (inputs.check-command): its
 #          generated-files drift check, the build, the tests against its
 #          fake cloud or recorded cassettes. No secrets, no cloud.
+#          First, licences (taskfiles/licenses.yml): no MPL, GPL, AGPL,
+#          LGPL, SSPL or BUSL licence header in the repository's own files,
+#          and every Go module linked into inputs.licenses-packages under an
+#          accepted licence (permissive or MPL-2.0, linked unmodified).
 #   e2e    the repository's kind end-to-end test, when it has one.
 #   ci     the one status branch protection requires: fails if any job
 #          above failed or was cancelled; a skipped job is fine
@@ -66,6 +70,10 @@ on:
         default: true
       go-packages:
         description: The packages golangci-lint and govulncheck look at
+        type: string
+        default: ./...
+      licenses-packages:
+        description: The packages whose linked Go modules' licences are checked (taskfiles/licenses.yml); empty checks only file headers
         type: string
         default: ./...
 
@@ -246,6 +254,21 @@ jobs:
         env:
           CMD: ${{ inputs.setup-command }}
         run: bash -euo pipefail -c "${CMD}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: taskfiles
+          persist-credentials: false
+      - name: Licences (file headers, linked Go modules)
+        env:
+          PKGS: ${{ inputs.licenses-packages }}
+        run: |
+          set -euo pipefail
+          t=../../.hfl-ci/taskfiles/licenses.yml
+          task --taskfile "${t}" headers
+          if [[ -n "${PKGS}" ]]; then task --taskfile "${t}" deps PKGS="${PKGS}"; fi
       - name: Hermetic check
         env:
           CMD: ${{ inputs.check-command }}

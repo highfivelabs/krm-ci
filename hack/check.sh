@@ -16,8 +16,11 @@ export PATH="${tools}:${PATH}"
 
 python3 -m unittest discover -s ci/krm -p '*_test.py'
 
-# The shared Taskfile the operator repositories include parses.
+# The shared Taskfiles parse.
 task --taskfile taskfiles/go.yml --list-all >/dev/null
+task --taskfile taskfiles/licenses.yml --list-all >/dev/null
+# krm-ci's own files carry no copyleft or source-available licence header.
+task --taskfile taskfiles/licenses.yml headers
 
 # Every repository's callers render at this commit.
 out="$(mktemp -d)"

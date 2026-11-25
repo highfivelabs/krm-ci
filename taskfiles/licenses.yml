@@ -1,0 +1,101 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licence checks every High Five Labs Go repository runs: in its own
+# `task check` (a remote include, pinned like go.yml; taskfiles/README.md)
+# and in krm-ci.yml's test job. Nothing here names a repository.
+#
+#   licenses:check     both checks below
+#   licenses:deps      every Go module linked into PKGS has a licence in the
+#                      accepted set (permissive: Apache-2.0, MIT, BSD, ISC,
+#                      Zlib, Unicode; and MPL-2.0), or is listed in ALLOW_FILE after review
+#   licenses:headers   no file outside third_party/ and vendor/ carries a
+#                      copyleft or source-available licence header (MPL, GPL,
+#                      AGPL, LGPL, SSPL, BUSL): such code is linked, never copied
+#
+# MPL-2.0 is accepted as a dependency only: linked unmodified, never patched
+# and never copied into our files (HFL-714; config-connector-extensions
+# decision 41). BUSL (Terraform core since 1.6, Vault, Consul, ...) and the GPL
+# family are never accepted.
+#
+# Vars:
+#   PKGS        packages to report on (default ./...)
+#   ALLOW_FILE  reviewed exceptions, one "module licence  # why" per line
+#               (default .licenses-allow.txt; optional)
+#   EXCLUDE     extra pathspecs left out of the header check, space-separated
+#               (e.g. ':!testdata/upstream/**')
+version: '3'
+
+silent: true
+
+vars:
+  GO_LICENSES: github.com/google/go-licenses/v2@v2.0.1
+  ACCEPTED: 'Apache-2.0|MIT|BSD-2-Clause|BSD-3-Clause|0BSD|ISC|Zlib|Unicode-DFS-2016|Unicode-3.0|MPL-2.0'
+
+tasks:
+  check:
+    desc: 'Licences: every linked Go module in the accepted set, no copyleft or source-available licence headers in our files'
+    cmds:
+      - task: deps
+      - task: headers
+
+  deps:
+    desc: 'Fail if a linked Go module''s licence is outside the accepted set (permissive licences and MPL-2.0) and not reviewed in ALLOW_FILE'
+    dir: '{{.USER_WORKING_DIR}}'
+    vars:
+      PKGS: '{{.PKGS | default "./..."}}'
+      ALLOW_FILE: '{{.ALLOW_FILE | default ".licenses-allow.txt"}}'
+    cmds:
+      - |
+        set -euo pipefail
+        bin="${XDG_CACHE_HOME:-${HOME}/.cache}/hfl-krm-tools/go-licenses-v2.0.1"
+        if [[ ! -x "${bin}/go-licenses" ]]; then
+          GOBIN="${bin}" go install "{{.GO_LICENSES}}"
+        fi
+        # go-licenses prints "module,url,licence"; keep the first and last.
+        report="$("${bin}/go-licenses" report {{.PKGS}} 2>/dev/null | awk -F, '{print $1 "," $NF}' | sort -u)"
+        [[ -n "${report}" ]] || { echo "licenses: go-licenses reported nothing for {{.PKGS}}" >&2; exit 1; }
+        allowed=""
+        if [[ -f "{{.ALLOW_FILE}}" ]]; then
+          allowed="$(sed 's/#.*//' "{{.ALLOW_FILE}}" | awk 'NF >= 2 {print $1 "," $2}')"
+        fi
+        bad=""
+        while IFS=, read -r mod lic; do
+          [[ -n "${mod}" ]] || continue
+          if [[ "${lic}" =~ ^({{.ACCEPTED}})$ ]]; then continue; fi
+          if grep -qxF "${mod},${lic}" <<<"${allowed}"; then continue; fi
+          bad="${bad}  ${mod}: ${lic}"$'\n'
+        done <<<"${report}"
+        if [[ -n "${bad}" ]]; then
+          printf 'licenses: modules outside the accepted set (Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, MPL-2.0):\n%s' "${bad}" >&2
+          echo "licenses: drop the module, or review it and add \"module licence  # why\" to {{.ALLOW_FILE}}" >&2
+          exit 1
+        fi
+        mpl="$(grep -c ',MPL-2.0$' <<<"${report}" || true)"
+        echo "ok: $(wc -l <<<"${report}" | tr -d ' ') modules, licences accepted (${mpl} MPL-2.0, linked unmodified)"
+
+  headers:
+    desc: 'Fail if a file outside third_party/ and vendor/ carries an MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header'
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - |
+        set -euo pipefail
+        # An SPDX line naming one of them, or the grant sentence those
+        # licences ask each file to carry. Only a file's first 30 lines.
+        spdx='^[^A-Za-z0-9]*SPDX-License-Identifier:.*(MPL-|GPL-|AGPL-|LGPL-|SSPL-|BUSL-)'
+        grant='subject to the terms of the Mozilla Public License|under the terms of the GNU (Affero |Lesser )?General Public License as published|Licensed under the Business Source License'
+        list="$(mktemp)"
+        trap 'rm -f "${list}"' EXIT
+        git ls-files --cached --others --exclude-standard -- . \
+          ':!third_party/**' ':!vendor/**' ':!**/LICENSE*' ':!**/COPYING*' ':!**/NOTICE*' {{.EXCLUDE}} >"${list}"
+        [[ -s "${list}" ]] || { echo "licenses: no files listed (not a git checkout?)" >&2; exit 1; }
+        hits=0
+        while IFS= read -r f; do
+          [[ -f "${f}" ]] || continue
+          if head -n 30 "${f}" 2>/dev/null | LC_ALL=C grep -E -e "${spdx}" -e "${grant}" >/dev/null; then
+            echo "licenses: ${f}: copyleft or source-available licence header (link such code, never copy it)" >&2
+            hits=$((hits + 1))
+          fi
+        done <"${list}"
+        if [[ ${hits} -gt 0 ]]; then exit 1; fi
+        echo "ok: no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence headers outside third_party/ and vendor/"

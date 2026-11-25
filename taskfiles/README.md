@@ -14,6 +14,13 @@ a fork can fetch it with no credentials.
 | `go:fmt-check` | fail if a Go file under `DIRS` needs gofmt | `DIRS` |
 | `go:committed` | fail if generated output under `PATHS` differs from the index or is untracked | `PATHS`, `WHAT`, `HINT` |
 | `go:test-envtest` | run `go test` (or `CMD`) with envtest's assets found, the download retried; fail rather than skip | `BIN`, `ENVTEST_K8S_VERSION`, `PKGS`, `TIMEOUT` or `CMD` |
+| `licenses:check` | `licenses:headers`, then `licenses:deps` (`taskfiles/licenses.yml`) | as below |
+| `licenses:headers` | fail if a file outside `third_party/` and `vendor/` carries an MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header | `EXCLUDE` |
+| `licenses:deps` | fail if a Go module linked into `PKGS` is under a licence outside the accepted set (permissive, or MPL-2.0 linked unmodified) and not reviewed in `ALLOW_FILE` | `PKGS` (default `./...`), `ALLOW_FILE` (default `.licenses-allow.txt`) |
+
+`licenses.yml` is included like `go.yml`, under the name `licenses`, and
+`krm-ci.yml`'s test job runs it too, so the vendor repositories and the
+runtime (which have no Taskfile) get it from CI alone.
 
 Only tasks all the repositories run belong here. A task that calls a
 repository's own scripts (`upstream`, `coverage`, `upstream:yaml-check`)
@@ -69,3 +76,4 @@ remote:
 | --- | --- |
 | factory `taskfiles/v1.0.0` | The four tasks above, from `ack-extensions` and `config-connector-extensions` (`taskfiles/go.yml`) and `aso-extensions` (`taskfiles/common.yml`). `test-envtest` takes both `CMD` (config-connector-extensions) and `TIMEOUT` (ack-extensions); `committed` takes `HINT` (aso-extensions' `diff-clean`). |
 | krm-ci `v1.1.0` | Moved here from factory, unchanged but for the include URL in this file's header. |
+| krm-ci `v1.2.0` | `licenses.yml`: `licenses:check`, `licenses:headers`, `licenses:deps` (HFL-714). |

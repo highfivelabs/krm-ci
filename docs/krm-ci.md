@@ -150,9 +150,21 @@ token. Nothing in the workflow asks for more.
 | Job | Checks | Blocks on |
 | --- | --- | --- |
 | `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes; a reachable vulnerability that is new in the PR's head |
-| `test` | the repository's hermetic check, then "the working tree is clean" | failure or drift |
+| `test` | licences (`taskfiles/licenses.yml`): no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header in the repository's own files, and every Go module linked into `licenses_packages` under an accepted licence; then the repository's hermetic check, then "the working tree is clean" | a copyleft or source-available header; a module outside the accepted set and not reviewed in `.licenses-allow.txt`; failure or drift |
 | `e2e` | kind end to end, if the repository has one | failure |
 | `ci` | the gatekeeper | anything above failed or was cancelled (skipped is fine) |
+
+**Licences (HFL-714).** A dependency may be permissive (Apache-2.0, MIT,
+BSD, ISC, Zlib, Unicode) or MPL-2.0. MPL code is linked unmodified, never
+patched and never copied into our files: the header check catches a copied
+file, and config-connector-extensions' decision 41 records the rule. BUSL
+(Terraform core since 1.6, Vault, Consul, ...) and the GPL family are never
+accepted. A module go-licenses cannot classify fails until someone reviews
+it and lists it in the repository's `.licenses-allow.txt` as
+`module licence  # why`. The operator repositories need their upstream
+checkout before Go packages load, so they set `licenses_packages = ""` here
+and check modules in their own `task licenses`; the header check runs
+everywhere.
 
 **Why govulncheck fails only on what a PR adds:** on 2026-11-24,
 `cloudflare-krm-extensions` alone had 14 reachable vulnerabilities (x/net,

@@ -19,6 +19,9 @@
 #                           The contract: everything the live command makes is
 #                           named or tagged with LIVE_RUN_ID, and sweep deletes
 #                           what carries it.
+#   licenses_packages       Go packages whose linked modules' licences are
+#                           checked (taskfiles/licenses.yml); "" checks only
+#                           file headers
 #   timeout                 minutes for krm-ci.yml's test and e2e jobs
 #   live_timeout            minutes
 #   security_cron           the weekly scan's schedule, spread so the
@@ -44,6 +47,7 @@ sibling = "krm-rest-runtime"
 # runtime's Go packages separately. Move this when the runtime's generator
 # changes, regenerating every vendor repository in the same rollout.
 sibling_ref = "fad382d05df5a1b0a7c339f174ecd6a3abb06721"
+licenses_packages = "./..."
 live_cloud = "gcp"
 live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
 sweep = ""
@@ -68,6 +72,11 @@ free_disk = true
 timeout = 90
 sibling = ""
 sibling_ref = ""
+# The managers need the upstream checkout that hack/ci/pr.sh fetches, so
+# each repository names its own (setup must fetch it first); until then only
+# file headers are checked here, and the repository's task licenses checks
+# the modules.
+licenses_packages = ""
 live_timeout = 60
 sweep = ""
 
@@ -82,6 +91,7 @@ free_disk = false
 timeout = 20
 sibling = ""
 sibling_ref = ""
+licenses_packages = "./..."
 live_cloud = "gcp"
 live_command = ""
 sweep = ""
