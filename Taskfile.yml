@@ -1,0 +1,32 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# krm-ci's entry points (https://taskfile.dev). `task --list` shows them.
+version: '3'
+
+set: [errexit, pipefail]
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  check:
+    desc: 'Everything that must hold before a commit, as check.yml runs it: the gate and sync tests, a render of every repository''s callers, shellcheck, actionlint, zizmor (hack/check.sh; task krm:tools first)'
+    cmds:
+      - hack/check.sh
+
+  "krm:tools":
+    desc: 'The baseline''s lint and security tools (golangci-lint, gitleaks, actionlint, zizmor, govulncheck) at its pins, checksummed, into ~/.local/hfl-krm-tools (ci/krm/tools.sh)'
+    cmds:
+      - ci/krm/tools.sh {{.CLI_ARGS}}
+
+  "krm:sync":
+    desc: 'Render the repositories'' caller workflows from ci/krm/repos.toml into the sibling checkouts: task krm:sync -- --tag vX.Y.Z [--only NAME] [--check] (docs/krm-ci.md)'
+    cmds:
+      - ci/krm/sync.py --repos-dir "{{.ROOT_DIR}}/.." {{.CLI_ARGS}}
+
+  "krm:probe":
+    desc: 'Check the review''s Claude Code sandbox still holds (a hostile checkout; calls Haiku with your login): before moving krm-review.yml''s claude-code-version'
+    cmds:
+      - ci/krm/review/probe.sh

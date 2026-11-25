@@ -1,0 +1,165 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every repository on the KRM CI baseline (docs/krm-ci.md), and what is
+# particular to it. ci/krm/sync.py renders each one's caller workflows
+# (.github/workflows/hfl-*.yml) and .github/dependabot.yml from
+# ci/krm/callers/ with these values. Adding a repository is one [[repo]]
+# entry (Amazon's ACK onboards a controller with one line the same way).
+#
+# A repository takes its profile's values; its own keys override them.
+#
+#   check, setup, e2e       commands run by krm-ci.yml (bash, in the checkout)
+#   free_disk, sibling,     see krm-ci.yml's inputs
+#   sibling_ref
+#   live                    render hfl-live.yml at all (false until the repository's
+#                           live command and sweep keep the contract below)
+#   live_cloud              gcp | aws | azure | none (a local sandbox)
+#   live_command, sweep     run by krm-live.yml; KRM_LIVE_KINDS, LIVE_RUN_ID set.
+#                           The contract: everything the live command makes is
+#                           named or tagged with LIVE_RUN_ID, and sweep deletes
+#                           what carries it.
+#   live_timeout            minutes
+#   security_cron           the weekly scan's schedule, spread so the
+#                           repositories don't all run at once
+#
+# Live runs stay off in a repository until its variable HFL_LIVE_ENABLED is
+# 'true': set it once the cloud trusts the repository's `live` environment
+# (docs/krm-ci.md, "Cloud trust").
+
+[profile.vendor]
+live = true
+setup = ""
+check = '''python3 -m venv "${RUNNER_TEMP}/py" && "${RUNNER_TEMP}/py/bin/pip" install -q pyyaml==6.0.3 && export PATH="${RUNNER_TEMP}/py/bin:${PATH}" && hack/gen/generate.sh && go build ./... && go vet ./... && go vet -tags live ./... && go test ./...'''
+e2e = ""
+free_disk = false
+sibling = "krm-rest-runtime"
+sibling_ref = "v0.19.0"
+live_cloud = "gcp"
+live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
+sweep = ""
+live_timeout = 45
+
+# Live off until each repository's migration: their run scripts make their
+# own run IDs (cce-…, ackx-…) and sweep by those, not by LIVE_RUN_ID, and
+# their credentials come from offload VMs today (review round 1, R3).
+[profile.operator]
+live = false
+live_cloud = "none"
+live_command = ""
+setup = "task tools"
+check = "task check"
+e2e = "task operator-e2e"
+free_disk = true
+sibling = ""
+sibling_ref = ""
+live_timeout = 60
+sweep = ""
+
+# The runtime has no live run of its own; the vendor repositories' live
+# runs exercise it.
+[profile.runtime]
+live = false
+setup = ""
+check = "go build ./... && go vet ./... && go test ./..."
+e2e = ""
+free_disk = false
+sibling = ""
+sibling_ref = ""
+live_cloud = "gcp"
+live_command = ""
+sweep = ""
+live_timeout = 30
+
+[[repo]]
+name = "config-connector-extensions"
+profile = "operator"
+live_cloud = "gcp"
+security_cron = "40 7 * * 1"
+
+[[repo]]
+name = "ack-extensions"
+profile = "operator"
+live_cloud = "aws"
+security_cron = "40 8 * * 1"
+
+[[repo]]
+name = "aso-extensions"
+profile = "operator"
+live_cloud = "azure"
+security_cron = "40 9 * * 1"
+
+[[repo]]
+name = "krm-rest-runtime"
+profile = "runtime"
+security_cron = "10 6 * * 2"
+
+[[repo]]
+name = "cloudflare-krm-extensions"
+profile = "vendor"
+security_cron = "20 6 * * 2"
+
+[[repo]]
+name = "confluent-krm-extensions"
+profile = "vendor"
+security_cron = "30 6 * * 2"
+
+[[repo]]
+name = "datadog-krm-extensions"
+profile = "vendor"
+security_cron = "40 6 * * 2"
+
+[[repo]]
+name = "github-krm-extensions"
+profile = "vendor"
+security_cron = "50 6 * * 2"
+
+[[repo]]
+name = "gitlab-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:gitlab && task live:gitlab"
+sweep = "task live:sandbox:gitlab:down"
+security_cron = "10 7 * * 2"
+
+[[repo]]
+name = "grafana-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:grafana && task live:grafana"
+sweep = "task live:sandbox:grafana:down"
+security_cron = "20 7 * * 2"
+
+[[repo]]
+name = "mongodbatlas-krm-extensions"
+profile = "vendor"
+security_cron = "30 7 * * 2"
+
+[[repo]]
+name = "okta-krm-extensions"
+profile = "vendor"
+security_cron = "40 7 * * 2"
+
+[[repo]]
+name = "pagerduty-krm-extensions"
+profile = "vendor"
+security_cron = "50 7 * * 2"
+
+[[repo]]
+name = "sentry-krm-extensions"
+profile = "vendor"
+sibling_ref = "v0.19.1"
+security_cron = "10 8 * * 2"
+
+[[repo]]
+name = "snowflake-krm-extensions"
+profile = "vendor"
+security_cron = "20 8 * * 2"
+
+[[repo]]
+name = "vault-krm-extensions"
+profile = "vendor"
+live_cloud = "none"
+live_command = "task live:sandbox:vault && task live:vault"
+sweep = "task live:sandbox:vault:down"
+security_cron = "30 8 * * 2"

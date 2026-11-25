@@ -1,0 +1,144 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# The KRM CI baseline's scheduled security checks (docs/krm-ci.md), called
+# from each repository's hfl-security.yml on a weekly schedule and on push
+# to main. A pull request checks only what it changes (krm-ci.yml); this
+# checks everything:
+#
+#   scan       gitleaks over the whole history, govulncheck over the whole
+#              module, zizmor over every workflow. A finding opens one
+#              issue labelled security-scan, or comments on it if it is
+#              already open.
+#   codeql     GitHub's CodeQL for Go (public repositories: free there).
+#   scorecard  OpenSSF Scorecard, published to the Scorecard API and the
+#              Security tab (public repositories).
+name: krm-security
+
+on:
+  workflow_call:
+    inputs:
+      ci-ref:
+        type: string
+        required: true
+      go-packages:
+        type: string
+        default: ./...
+      setup-command:
+        description: Runs before CodeQL builds the code
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KRM_TOOLS: ${{ github.workspace }}/.hfl-tools
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+      - run: .hfl-ci/ci/krm/tools.sh gitleaks govulncheck zizmor && echo "${KRM_TOOLS}" >> "${GITHUB_PATH}"
+      - name: Scan
+        id: scan
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKGS: ${{ inputs.go-packages }}
+        run: |
+          set -uo pipefail
+          failed=()
+          cfg=../.hfl-ci/ci/krm/gitleaks.toml
+          [[ -f .gitleaks.toml ]] && cfg=.gitleaks.toml
+          gitleaks git --no-banner --redact --config "${cfg}" . || failed+=("gitleaks (history)")
+          # shellcheck disable=SC2086
+          govulncheck ${PKGS} > "${RUNNER_TEMP}/govulncheck.txt" 2>&1 || failed+=("govulncheck")
+          tail -n 40 "${RUNNER_TEMP}/govulncheck.txt"
+          if [[ -d .github ]]; then
+            zizmor --config ../.hfl-ci/ci/krm/zizmor.yml --min-severity medium .github || failed+=("zizmor")
+          fi
+          echo "failed=${failed[*]}" >> "${GITHUB_OUTPUT}"
+      - name: Report
+        if: steps.scan.outputs.failed != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ steps.scan.outputs.failed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          line="$(date -u +%F) on ${SHA:0:12}: ${FAILED}. ${RUN_URL}"
+          issue="$(gh issue list --label security-scan --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "${issue}" ]]; then
+            gh issue comment "${issue}" --body "Still failing: ${line}"
+          else
+            gh label create security-scan --color B60205 --description "The scheduled security scan found something" --force
+            gh issue create --label security-scan --title "Scheduled security scan found issues" \
+              --body "The scheduled scan (krm-security.yml) failed: ${line}"
+          fi
+          exit 1
+
+  codeql:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - if: inputs.setup-command != ''
+        env:
+          CMD: ${{ inputs.setup-command }}
+        run: bash -euo pipefail -c "${CMD}"
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: go
+          build-mode: autobuild
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+
+  scorecard:
+    if: ${{ !github.event.repository.private && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write # publish_results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: scorecard.sarif

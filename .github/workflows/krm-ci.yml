@@ -1,0 +1,314 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# The KRM CI baseline's pull-request checks (docs/krm-ci.md), called from
+# each extension repository's hfl-ci.yml (rendered by ci/krm/sync.py).
+#
+#   lint   actionlint and zizmor on the repository's workflows; gofmt and
+#          golangci-lint (on a pull request, only what it changes); gitleaks
+#          on the pull request's commits; govulncheck, failing on a
+#          reachable vulnerability the pull request adds; GitHub's
+#          dependency review (public repositories).
+#   test   the repository's own hermetic check (inputs.check-command): its
+#          generated-files drift check, the build, the tests against its
+#          fake cloud or recorded cassettes. No secrets, no cloud.
+#   e2e    the repository's kind end-to-end test, when it has one.
+#   ci     the one status branch protection requires: fails if any job
+#          above failed or was cancelled; a skipped job is fine
+#          (Config Connector's presubmit-gatekeeper).
+#
+# Safe for a pull request from a fork: it runs on `pull_request`, so it gets
+# no secrets and a read-only token, and nothing here asks for more.
+name: krm-ci
+
+on:
+  workflow_call:
+    inputs:
+      ci-ref:
+        description: The commit of highfivelabs/krm-ci this workflow is called at (the same SHA as in `uses:`); its ci/krm/ scripts and configs are used
+        type: string
+        required: true
+      check-command:
+        description: The repository's hermetic check. BASE_SHA and HEAD_SHA are set for a selective run.
+        type: string
+        default: task ci:check
+      setup-command:
+        description: Runs before check-command and e2e-command (tools, upstream checkout)
+        type: string
+        default: ""
+      e2e-command:
+        description: The kind end-to-end test; empty for none
+        type: string
+        default: ""
+      runs-on:
+        description: The runner for test and e2e
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        type: number
+        default: 60
+      free-disk:
+        description: Remove the runner's unused SDKs first (about 30 GB), for repositories with a large module graph
+        type: boolean
+        default: false
+      sibling-repo:
+        description: Another repository of this organisation (its name) checked out beside this one, for repositories whose scripts read ../<name>
+        type: string
+        default: ""
+      sibling-ref:
+        type: string
+        default: ""
+      golangci:
+        type: boolean
+        default: true
+      govulncheck:
+        type: boolean
+        default: true
+      go-packages:
+        description: The packages golangci-lint and govulncheck look at
+        type: string
+        default: ./...
+
+permissions: {}
+
+env:
+  KRM_TOOLS: ${{ github.workspace }}/.hfl-tools
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src/${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src/${{ github.event.repository.name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      - if: inputs.sibling-repo != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ inputs.sibling-repo }}
+          ref: ${{ inputs.sibling-ref }}
+          path: src/${{ inputs.sibling-repo }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/${{ github.event.repository.name }}/go.mod
+          cache-dependency-path: src/${{ github.event.repository.name }}/go.sum
+      - name: Lint and security tools (pinned, checksummed)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.KRM_TOOLS }}
+          key: krm-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.hfl-ci/ci/krm/tools.sh') }}
+      - run: ../../.hfl-ci/ci/krm/tools.sh && echo "${KRM_TOOLS}" >> "${GITHUB_PATH}"
+
+      - name: The range this run judges
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT}" == "pull_request" ]]; then
+            base="$(git merge-base "${BASE}" "${HEAD}")"
+          else
+            base=""
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+
+      - name: Workflows (actionlint, zizmor)
+        if: hashFiles(format('src/{0}/.github/**', github.event.repository.name)) != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actionlint -shellcheck=
+          # Online audits (impostor commits, ref confusion) read GitHub with
+          # the job's read-only token.
+          zizmor --config ../../.hfl-ci/ci/krm/zizmor.yml --min-severity medium --format github .github
+
+      - name: gofmt
+        run: |
+          out="$(git ls-files -z '*.go' ':!:third_party/**' | xargs -0 -r gofmt -l)"
+          if [[ -n "${out}" ]]; then echo "${out}"; echo "::error::gofmt needed (gofmt -w the files above)"; exit 1; fi
+
+      - name: golangci-lint
+        if: inputs.golangci
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          PKGS: ${{ inputs.go-packages }}
+        run: |
+          set -euo pipefail
+          cfg=.golangci.yml
+          [[ -f "${cfg}" || -f .golangci.yaml ]] || cfg=../../.hfl-ci/ci/krm/golangci.yml
+          [[ -f .golangci.yaml ]] && cfg=.golangci.yaml
+          args=(run --config "${cfg}")
+          [[ -n "${BASE}" ]] && args+=(--new-from-merge-base "${BASE}")
+          # shellcheck disable=SC2086
+          golangci-lint "${args[@]}" ${PKGS}
+
+      - name: Secrets in the pull request's commits (gitleaks)
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: |
+          set -euo pipefail
+          cfg=../../.hfl-ci/ci/krm/gitleaks.toml
+          [[ -f .gitleaks.toml ]] && cfg=.gitleaks.toml
+          opts="--log-opts=-n 200"
+          [[ -n "${BASE}" ]] && opts="--log-opts=${BASE}..HEAD"
+          gitleaks git --no-banner --redact --config "${cfg}" "${opts}" .
+
+      - name: Reachable vulnerabilities this change adds (govulncheck)
+        if: inputs.govulncheck
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          PKGS: ${{ inputs.go-packages }}
+        run: |
+          set -euo pipefail
+          gate=../../.hfl-ci/ci/krm/gate.py
+          # shellcheck disable=SC2086
+          govulncheck -format json ${PKGS} > "${RUNNER_TEMP}/head.json" || true
+          if [[ -n "${BASE}" ]]; then
+            git worktree add -q "${RUNNER_TEMP}/base" "${BASE}"
+            # shellcheck disable=SC2086
+            (cd "${RUNNER_TEMP}/base" && govulncheck -format json ${PKGS} > "${RUNNER_TEMP}/base.json" 2>/dev/null) || true
+          else
+            : > "${RUNNER_TEMP}/base.json"
+          fi
+          result="$(python3 -I "${gate}" vulns --base "${RUNNER_TEMP}/base.json" --head "${RUNNER_TEMP}/head.json")" && rc=0 || rc=$?
+          echo "${result}"
+          {
+            echo "### govulncheck"
+            echo '```json'
+            echo "${result}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          # On main, the nightly security workflow reports what is already
+          # there; a pull request fails only on what it adds.
+          if [[ -n "${BASE}" && "${rc}" -ne 0 ]]; then
+            echo "::error::this change adds reachable vulnerabilities (above); update the module or avoid the call"
+            exit 1
+          fi
+
+      - name: Dependency review
+        if: github.event_name == 'pull_request' && !github.event.repository.private
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+
+  test:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src/${{ github.event.repository.name }}
+    steps:
+      - if: inputs.free-disk && runner.environment == 'github-hosted'
+        working-directory: /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src/${{ github.event.repository.name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - if: inputs.sibling-repo != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ inputs.sibling-repo }}
+          ref: ${{ inputs.sibling-ref }}
+          path: src/${{ inputs.sibling-repo }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/${{ github.event.repository.name }}/go.mod
+          cache-dependency-path: src/${{ github.event.repository.name }}/go.sum
+      - uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+        with:
+          version: 3.54.0
+          repo-token: ${{ github.token }}
+      - if: inputs.setup-command != ''
+        env:
+          CMD: ${{ inputs.setup-command }}
+        run: bash -euo pipefail -c "${CMD}"
+      - name: Hermetic check
+        env:
+          CMD: ${{ inputs.check-command }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -euo pipefail -c "${CMD}"
+      - name: Generated files are committed
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain
+            echo "::error::the check changed or created files above: regenerate and commit them"
+            exit 1
+          fi
+
+  e2e:
+    if: inputs.e2e-command != ''
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src/${{ github.event.repository.name }}
+    steps:
+      - if: inputs.free-disk && runner.environment == 'github-hosted'
+        working-directory: /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src/${{ github.event.repository.name }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/${{ github.event.repository.name }}/go.mod
+          cache-dependency-path: src/${{ github.event.repository.name }}/go.sum
+      - uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+        with:
+          version: 3.54.0
+          repo-token: ${{ github.token }}
+      - if: inputs.setup-command != ''
+        env:
+          CMD: ${{ inputs.setup-command }}
+        run: bash -euo pipefail -c "${CMD}"
+      - env:
+          CMD: ${{ inputs.e2e-command }}
+        run: bash -euo pipefail -c "${CMD}"
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 100 || true
+
+  ci:
+    needs: [lint, test, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "lint, test, e2e: ${RESULTS}"
+          for r in ${RESULTS}; do
+            case "${r}" in success|skipped) ;; *) exit 1 ;; esac
+          done

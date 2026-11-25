@@ -1,0 +1,12 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# zizmor (GitHub Actions security lint) for the KRM CI baseline. Every
+# action is pinned to a full commit SHA, ours included: a tag can be moved,
+# a SHA cannot (the 2025 tj-actions and 2026 trivy-action compromises both
+# moved tags).
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

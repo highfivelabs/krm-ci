@@ -1,0 +1,17 @@
+# Copyright 2026 High Five Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# gitleaks for the KRM CI baseline: the default rules, plus cassettes and
+# recordings scanned like any other file (a recorded response is where a
+# live credential most often slips in). A repository adds its own
+# false positives in .gitleaksignore (fingerprints), never by disabling a
+# rule here.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated upstream schemas and third-party checkouts"
+paths = [
+  '''^third_party/''',
+  '''(^|/)go\.sum$''',
+]

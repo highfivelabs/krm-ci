@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Read(./**)",
+      "Grep(./**)",
+      "Glob(./**)"
+    ],
+    "deny": [
+      "Bash",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "Read(//proc/**)",
+      "Read(//sys/**)",
+      "Read(//dev/**)",
+      "Read(//etc/**)",
+      "Read(~/**)",
+      "Read(../**)",
+      "Read(./.git/**)",
+      "Grep(//proc/**)",
+      "Grep(//sys/**)",
+      "Grep(//etc/**)",
+      "Grep(~/**)",
+      "Grep(../**)",
+      "Glob(../**)",
+      "Glob(~/**)"
+    ]
+  },
+  "disableAllHooks": true,
+  "enableAllProjectMcpServers": false,
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}
