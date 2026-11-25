@@ -43,7 +43,7 @@ sibling = "krm-rest-runtime"
 # files match; a full SHA, since krm-rest-runtime has no tags. go.mod pins the
 # runtime's Go packages separately. Move this when the runtime's generator
 # changes, regenerating every vendor repository in the same rollout.
-sibling_ref = "7439d5548d68dd401cdf0eda6471c1df3f058d2f"
+sibling_ref = "fad382d05df5a1b0a7c339f174ecd6a3abb06721"
 live_cloud = "gcp"
 live_command = 'go test -tags live -run TestEveryKindLive -timeout "$(( ${LIVE_TIMEOUT_MINUTES} - 5 ))m" -v .'
 sweep = ""
