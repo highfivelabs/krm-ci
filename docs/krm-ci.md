@@ -31,7 +31,7 @@ Service Operator was also read through our own PR #5844.
 | **Required status** | Several checks, juggled across workflows | Prow labels and Tide | One gatekeeper (`presubmit-gatekeeper`) and a merge queue |
 | **Drift gates** | `verify-no-changes` after format and generate; `go mod tidy -diff` | verify-codegen, CRD compatibility | generate/manifests/docs/fmt then `git diff`; generated-workflow drift; untested-fields |
 | **Lint** | golangci v2 with gosec, errorlint, bodyclose, noctx and others; gofumpt; a ban on `%v` | thin (shellcheck, codespell) | golangci (depguard, errorlint, revive), custom analyzers, addlicense |
-| **Supply chain** | Every action pinned by SHA, `permissions: {}`, Dependabot with a 7-day cooldown, CodeQL, weekly Trivy, immutable registry | Inconsistent pins, a monthly Trivy | SHA pins in generated workflows, zizmor (org-required), Dependabot and Renovate both |
+| **Supply chain** | Every action pinned by SHA, `permissions: {}`, Dependabot with a 7-day cooldown, CodeQL, weekly Trivy, immutable registry | Inconsistent pins, a monthly Trivy | SHA pins in generated workflows, zizmor (org-required), Renovate (Dependabot alerts only) |
 | **Missing** | govulncheck, SBOM, signing, Scorecard | signing, SBOM, govulncheck, linters | CodeQL, govulncheck, SBOM, signing |
 | **Contributor agreement** | CLA | none | CLA |
 
@@ -77,7 +77,9 @@ Service Operator was also read through our own PR #5844.
   `HEAD_SHA`).
 - **Live tests on every PR** (ACK). They are expensive and the riskiest
   thing a PR can do, so they run only on request and under the three locks.
-- **Two dependency bots** (Config Connector). We use Dependabot only.
+- **Two dependency bots** (Config Connector). We use Renovate only
+  (factory `docs/renovate.md`); Dependabot's version updates are retired
+  (HFL-730) and its alerts stay on.
 
 ## 3. Shape
 
@@ -100,13 +102,12 @@ each repository
   .github/workflows/hfl-review.yml    on pull_request_target            -> krm-review.yml@<sha>
   .github/workflows/hfl-live.yml      on issue_comment                  -> krm-live.yml@<sha>
   .github/workflows/hfl-security.yml  weekly + push to main             -> krm-security.yml@<sha>
-  .github/dependabot.yml
 ```
 
 A caller pins krm-ci by commit SHA, with its tag as the comment
 (`@<sha> # v1.0.0`). The `uses:` pin and the `ci-ref` input must move
-together, so only sync moves them; the rendered `dependabot.yml` ignores
-krm-ci. A change to the baseline is a krm-ci pull request, then
+together, so only sync moves them; Renovate's preset leaves
+`highfivelabs/krm-ci` alone. A change to the baseline is a krm-ci pull request, then
 a tag, then `task krm:sync -- --tag vX.Y.Z`. That opens
 one small pin-move pull request per repository, which runs the new baseline
 before it merges. No repository changes without its own CI passing on the
@@ -208,7 +209,7 @@ vendor repositories and the runtime, the binaries for the operators.
 `cloudflare-krm-extensions` alone had 14 reachable vulnerabilities (x/net,
 x/text and the standard library at `go 1.25.0`). Failing every PR on those
 would stop all work on day one. The PR gate stops new vulnerabilities from
-coming in. The weekly scan and Dependabot clear the existing ones.
+coming in. The weekly scan and Renovate clear the existing ones.
 
 ## 5. The review (`krm-review.yml`)
 

@@ -15,9 +15,10 @@ is resolved to its commit in this checkout (git rev-parse TAG^{commit});
 never moved; a pin move is a sync with a new tag, reviewed like any
 change.
 
-Writes .github/workflows/hfl-{ci,review,live,security}.yml and
-.github/dependabot.yml. It does not delete a repository's older workflows;
-the migration pull request does (docs/krm-ci.md, "Migration").
+Writes .github/workflows/hfl-{ci,review,live,security}.yml. It deletes
+the files it rendered and no longer renders (RETIRED; hfl-live.yml when
+live = false), and only those: a repository's older workflows are the
+migration pull request's (docs/krm-ci.md, "Migration").
 """
 from __future__ import annotations
 
@@ -35,8 +36,11 @@ OUTPUTS = {
     "hfl-review.yml": ".github/workflows/hfl-review.yml",
     "hfl-live.yml": ".github/workflows/hfl-live.yml",
     "hfl-security.yml": ".github/workflows/hfl-security.yml",
-    "dependabot.yml": ".github/dependabot.yml",
 }
+# Files sync rendered once and no longer does. Dependabot's version updates
+# gave way to Renovate (factory docs/renovate.md, HFL-730): its pull requests
+# were never tested here, and it moved Go modules off the upstream pins.
+RETIRED = {".github/dependabot.yml": "Renovate keeps dependencies current (HFL-730)"}
 # Values inserted as YAML scalars: quoted with JSON's escaping, which YAML's
 # double-quoted style reads the same way.
 QUOTED = {"setup", "lint_setup", "check", "e2e", "sibling", "sibling_ref", "licenses_packages", "live_command", "sweep", "live_cloud"}
@@ -101,9 +105,12 @@ def render(template: str, values: dict) -> str:
     return PLACEHOLDER.sub(sub, template)
 
 
-def removed(repo: dict) -> list[str]:
-    """Rendered files this repository must no longer have."""
-    return [] if repo["live"] else [OUTPUTS["hfl-live.yml"]]
+def removed(repo: dict) -> dict[str, str]:
+    """Rendered files this repository must no longer have, and why."""
+    out = dict(RETIRED)
+    if not repo["live"]:
+        out[OUTPUTS["hfl-live.yml"]] = "live = false"
+    return out
 
 
 def outputs(repo: dict, ref: str, tag: str = "untagged") -> dict[str, str]:
@@ -170,7 +177,7 @@ def main(argv=None) -> int:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
             print(f"sync: {r['name']}: wrote {dest}")
-        for dest in removed(r):
+        for dest, why in removed(r).items():
             path = os.path.join(root, dest)
             if not os.path.exists(path):
                 continue
@@ -180,11 +187,11 @@ def main(argv=None) -> int:
                 print(f"sync: {r['name']}: {dest} exists but was not rendered by sync; left alone")
                 continue
             if args.check:
-                print(f"sync: {r['name']}: {dest} should not exist (live = false)")
+                print(f"sync: {r['name']}: {dest} should not exist ({why})")
                 drift += 1
                 continue
             os.remove(path)
-            print(f"sync: {r['name']}: removed {dest} (live = false)")
+            print(f"sync: {r['name']}: removed {dest} ({why})")
     return 1 if drift else 0
 
 
