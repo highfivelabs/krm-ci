@@ -3,7 +3,7 @@
 #
 # Every repository on the KRM CI baseline (docs/krm-ci.md), and what is
 # particular to it. ci/krm/sync.py renders each one's caller workflows
-# (.github/workflows/hfl-*.yml) and .github/dependabot.yml from
+# (.github/workflows/hfl-*.yml) from
 # ci/krm/callers/ with these values. Adding a repository is one [[repo]]
 # entry (Amazon's ACK onboards a controller with one line the same way).
 #

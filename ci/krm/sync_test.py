@@ -55,9 +55,26 @@ class Sync(unittest.TestCase):
             if r["sibling"]:
                 self.assertRegex(r["sibling_ref"], r"^[0-9a-f]{40}$", r["name"])
 
-    def test_dependabot_leaves_the_pin_to_sync(self):
-        text = sync.outputs(self.repos[0], REF)[".github/dependabot.yml"]
-        self.assertIn('dependency-name: "highfivelabs/krm-ci*"', text)
+    def test_dependabot_retired(self):
+        # Renovate updates dependencies (HFL-730): sync deletes the
+        # dependabot.yml it rendered, and leaves a hand-written one alone.
+        for r in self.repos:
+            self.assertNotIn(".github/dependabot.yml", sync.outputs(r, REF), r["name"])
+        with tempfile.TemporaryDirectory() as d:
+            gh = os.path.join(d, "ack-extensions", ".github")
+            os.makedirs(gh)
+            dep = os.path.join(gh, "dependabot.yml")
+            with open(dep, "w") as fh:
+                fh.write(f"# {sync.RENDERED_MARK}; do not edit here.\nversion: 2\n")
+            argv = ["--ref", REF, "--repos-dir", d, "--only", "ack-extensions"]
+            self.assertEqual(sync.main(argv + ["--check"]), 1)
+            self.assertEqual(sync.main(argv), 0)
+            self.assertFalse(os.path.exists(dep))
+            self.assertEqual(sync.main(argv + ["--check"]), 0)
+            with open(dep, "w") as fh:
+                fh.write("version: 2\n")
+            self.assertEqual(sync.main(argv), 0)
+            self.assertTrue(os.path.exists(dep))
 
     def test_timeout(self):
         names = {r["name"]: r for r in self.repos}

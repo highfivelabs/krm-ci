@@ -18,7 +18,7 @@ Connector it draws on, the design, and the rollout.
 ## Using it
 
 A repository doesn't write its callers by hand. `ci/krm/sync.py` renders
-them (`.github/workflows/hfl-*.yml` and `.github/dependabot.yml`) from
+them (`.github/workflows/hfl-*.yml`) from
 `ci/krm/callers/` and the repository's entry in `ci/krm/repos.toml`,
 pinned to a tag's commit:
 
