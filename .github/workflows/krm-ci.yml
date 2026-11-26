@@ -68,7 +68,7 @@ on:
         type: number
         default: 60
       free-disk:
-        description: Remove the runner's unused SDKs first (about 30 GB), for repositories with a large module graph
+        description: Remove the runner's unused SDKs first (about 30 GB) in the lint, test and e2e jobs, for repositories with a large module graph
         type: boolean
         default: false
       sibling-repo:
@@ -120,6 +120,9 @@ jobs:
       run:
         working-directory: src/${{ github.event.repository.name }}
     steps:
+      - if: inputs.free-disk && runner.environment == 'github-hosted'
+        working-directory: /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src/${{ github.event.repository.name }}
@@ -205,6 +208,10 @@ jobs:
       - name: golangci-lint
         if: inputs.golangci
         env:
+          # An operator repository's packages load the whole upstream tree
+          # (Config Connector: 7.6 GB peak, cold); a soft limit keeps the
+          # 16 GB runner clear of the OOM killer.
+          GOMEMLIMIT: 10GiB
           BASE: ${{ steps.range.outputs.base }}
           PKGS: ${{ inputs.go-packages }}
         run: |
