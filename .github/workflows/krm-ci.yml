@@ -323,7 +323,10 @@ jobs:
   test:
     needs: plan
     if: needs.plan.outputs.gated != 'true'
-    name: ${{ inputs.test-shards > 1 && format('test {0}/{1}', matrix.shard, inputs.test-shards) || 'test' }}
+    # A plain name: GitHub doesn't evaluate a skipped job's name, so an
+    # expression here shows as its source when plan skips the job. With
+    # shards, GitHub appends the shard: "test (1)", "test (2)", ...
+    name: test
     strategy:
       fail-fast: false
       matrix:
