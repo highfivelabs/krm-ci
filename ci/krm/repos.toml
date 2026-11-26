@@ -76,7 +76,9 @@ free_disk = true
 timeout = 90
 sibling = ""
 sibling_ref = ""
-# Each operator repository names its own binaries; their packages load
+# Each operator repository names its own binaries, which govulncheck also
+# looks at (./... loads the whole upstream tree; govulncheck on Config
+# Connector's exhausted GitHub's runner). Their packages load
 # after the check has fetched the upstream checkout (krm-ci.yml runs the
 # module check after it).
 licenses_packages = ""

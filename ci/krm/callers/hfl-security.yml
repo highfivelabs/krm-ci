@@ -30,3 +30,4 @@ jobs:
     with:
       ci-ref: @@{ci_ref}
       setup-command: @@{lint_setup}
+      govulncheck-packages: @@{licenses_packages}

@@ -77,6 +77,10 @@ on:
         description: The packages golangci-lint and govulncheck look at
         type: string
         default: ./...
+      govulncheck-packages:
+        description: The packages govulncheck looks at, when not go-packages (an operator repository's binaries; ./... loads the whole upstream tree and exhausts the runner)
+        type: string
+        default: ""
       licenses-packages:
         description: The packages whose linked Go modules' licences are checked after the hermetic check (taskfiles/licenses.yml); empty checks only file headers
         type: string
@@ -209,7 +213,7 @@ jobs:
         if: inputs.govulncheck
         env:
           BASE: ${{ steps.range.outputs.base }}
-          PKGS: ${{ inputs.go-packages }}
+          PKGS: ${{ inputs.govulncheck-packages || inputs.go-packages }}
         run: |
           set -euo pipefail
           gate=../../.hfl-ci/ci/krm/gate.py

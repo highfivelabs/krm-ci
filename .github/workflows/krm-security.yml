@@ -21,6 +21,10 @@ on:
       ci-ref:
         type: string
         required: true
+      govulncheck-packages:
+        description: The packages govulncheck looks at, when not go-packages (an operator repository's binaries)
+        type: string
+        default: ""
       go-packages:
         type: string
         default: ./...
@@ -73,7 +77,7 @@ jobs:
         working-directory: src
         env:
           GH_TOKEN: ${{ github.token }}
-          PKGS: ${{ inputs.go-packages }}
+          PKGS: ${{ inputs.govulncheck-packages || inputs.go-packages }}
         run: |
           set -uo pipefail
           failed=()

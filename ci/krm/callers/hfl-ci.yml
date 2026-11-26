@@ -35,3 +35,4 @@ jobs:
       sibling-repo: @@{sibling}
       sibling-ref: @@{sibling_ref}
       licenses-packages: @@{licenses_packages}
+      govulncheck-packages: @@{licenses_packages}
