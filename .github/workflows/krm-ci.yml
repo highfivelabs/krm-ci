@@ -116,15 +116,17 @@ jobs:
           ref: ${{ inputs.sibling-ref }}
           path: src/${{ inputs.sibling-repo }}
           persist-credentials: false
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - id: go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: src/${{ github.event.repository.name }}/go.mod
           cache-dependency-path: src/${{ github.event.repository.name }}/go.sum
+      # The Go version is in the key: govulncheck is built with it (tools.sh).
       - name: Lint and security tools (pinned, checksummed)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.KRM_TOOLS }}
-          key: krm-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.hfl-ci/ci/krm/tools.sh') }}
+          key: krm-tools-${{ runner.os }}-${{ runner.arch }}-go${{ steps.go.outputs.go-version }}-${{ hashFiles('.hfl-ci/ci/krm/tools.sh') }}
       - run: ../../.hfl-ci/ci/krm/tools.sh && echo "${KRM_TOOLS}" >> "${GITHUB_PATH}"
       - if: inputs.lint-setup-command != ''
         uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0

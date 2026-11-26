@@ -105,12 +105,17 @@ zizmor() {
     "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${t}.tar.gz" zizmor
 }
 
+# govulncheck loads packages with the go/packages of the Go it was built
+# with, so a binary built with an older Go cannot read a module that needs a
+# newer one ("application built with go1.25"). The stamp holds the Go
+# version too: a different Go rebuilds it.
 govulncheck() {
-  local stamp="$DIR/.govulncheck.version"
-  if [[ -x "$DIR/govulncheck" && -f "$stamp" && "$(cat "$stamp")" == "$GOVULNCHECK_VERSION" ]]; then return; fi
+  local stamp="$DIR/.govulncheck.version" want
+  want="${GOVULNCHECK_VERSION} $(go env GOVERSION)"
+  if [[ -x "$DIR/govulncheck" && -f "$stamp" && "$(cat "$stamp")" == "$want" ]]; then return; fi
   GOBIN="$DIR" GOFLAGS=-mod=mod go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
-  echo "$GOVULNCHECK_VERSION" >"$stamp"
-  echo "tools: govulncheck $GOVULNCHECK_VERSION"
+  echo "$want" >"$stamp"
+  echo "tools: govulncheck $want"
 }
 
 ALL=(golangci-lint gitleaks actionlint zizmor govulncheck)
