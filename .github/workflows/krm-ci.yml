@@ -22,7 +22,10 @@
 #          request whose head already has the repository's pre-push gate
 #          status (offload/ci: hack/ci/gate.sh ran this same check and e2e
 #          on that commit, on an offload VM) posted by a person, they are
-#          skipped (gate.py offload). Pushes to main always run them.
+#          skipped (gate.py offload). Pushes to main always run them, with
+#          BASE_SHA set to the push's before, so a selective check judges
+#          what the push brought (the merge, as merged); the nightly run
+#          covers everything.
 #          test-shards > 1 runs test as that many jobs, each with
 #          KRM_SHARD and KRM_SHARDS set (ci/krm/shard.sh lists a shard's
 #          packages); the licence steps run in shard 1 only.
@@ -376,11 +379,22 @@ jobs:
         env:
           CMD: ${{ inputs.check-command }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           KRM_SHARD: ${{ matrix.shard }}
           KRM_SHARDS: ${{ inputs.test-shards }}
           KRM_CI_DIR: ${{ github.workspace }}/.hfl-ci
-        run: bash -euo pipefail -c "${CMD}"
+        run: |
+          set -euo pipefail
+          # A push is judged on what it pushed (before..after), as a pull
+          # request is on its base; the repository's nightly run covers
+          # everything. A push with no usable before runs everything.
+          if [[ -z "${BASE_SHA}" && "${EVENT}" == push && -n "${BEFORE}" && ! "${BEFORE}" =~ ^0+$ ]] \
+            && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            export BASE_SHA="${BEFORE}"
+          fi
+          bash -euo pipefail -c "${CMD}"
       # After the check: an operator repository's packages load only once
       # its check has fetched the upstream checkout. A pull request that
       # changes no go.mod, go.sum or .licenses-allow.txt links the same
@@ -444,8 +458,19 @@ jobs:
         env:
           CMD: ${{ inputs.e2e-command }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -euo pipefail -c "${CMD}"
+        run: |
+          set -euo pipefail
+          # A push is judged on what it pushed (before..after), as a pull
+          # request is on its base; the repository's nightly run covers
+          # everything. A push with no usable before runs everything.
+          if [[ -z "${BASE_SHA}" && "${EVENT}" == push && -n "${BEFORE}" && ! "${BEFORE}" =~ ^0+$ ]] \
+            && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            export BASE_SHA="${BEFORE}"
+          fi
+          bash -euo pipefail -c "${CMD}"
       - name: Cluster state on failure
         if: failure()
         run: |

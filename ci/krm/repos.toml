@@ -63,7 +63,7 @@ sweep = ""
 live_timeout = 45
 
 # Each operator repository's hack/ci/pr.sh plans from the changed paths
-# (its hack/ci/select.sh, BASE_SHA..HEAD_SHA; a push runs everything) and
+# (its hack/ci/select.sh, BASE_SHA..HEAD_SHA; a push, from its before) and
 # installs its tools only when something runs: `check` is task ci:check for
 # the plan, `e2e` is task operator-e2e when the plan asks for it.
 # Live off until each repository's live run keeps the LIVE_RUN_ID contract:
