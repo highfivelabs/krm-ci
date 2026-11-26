@@ -7,9 +7,10 @@
 # checks everything:
 #
 #   scan       gitleaks over the whole history, govulncheck over the whole
-#              module, zizmor over every workflow. A finding opens one
-#              issue labelled security-scan, or comments on it if it is
-#              already open.
+#              module, zizmor over every workflow. A finding fails the run;
+#              the factory's build doctor files a failed scheduled run in
+#              Linear (factory docs/build-doctor.md, HFL-732), so this opens
+#              no GitHub issue.
 #   codeql     GitHub's CodeQL for Go (public repositories: free there).
 #   scorecard  OpenSSF Scorecard, published to the Scorecard API and the
 #              Security tab (public repositories).
@@ -43,7 +44,6 @@ jobs:
       KRM_TOOLS: ${{ github.workspace }}/.hfl-tools
     permissions:
       contents: read
-      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,22 +94,10 @@ jobs:
       - name: Report
         if: steps.scan.outputs.failed != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           FAILED: ${{ steps.scan.outputs.failed }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          line="$(date -u +%F) on ${SHA:0:12}: ${FAILED}. ${RUN_URL}"
-          issue="$(gh issue list --label security-scan --state open --json number --jq '.[0].number // empty')"
-          if [[ -n "${issue}" ]]; then
-            gh issue comment "${issue}" --body "Still failing: ${line}"
-          else
-            gh label create security-scan --color B60205 --description "The scheduled security scan found something" --force
-            gh issue create --label security-scan --title "Scheduled security scan found issues" \
-              --body "The scheduled scan (krm-security.yml) failed: ${line}"
-          fi
+          echo "::error::the scheduled scan found something on ${SHA:0:12}: ${FAILED} (the build doctor files this run in Linear)"
           exit 1
 
   codeql:
