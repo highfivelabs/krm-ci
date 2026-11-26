@@ -168,9 +168,14 @@ success and was posted by a person, `test` and `e2e` are skipped and `ci`
 passes on `lint`. A Bot's status never counts: any workflow in the
 repository can post one as `github-actions[bot]`, but GitHub lets only a
 user with push access post a commit status. A fork's pull request has no
-such status, so it runs everything. Pushes to `main` always run everything,
-which also covers what the gate can't: it tested the head, not the merge
-with a `main` that moved since. `trust_offload = false` in `repos.toml`
+such status, so it runs everything. Pushes to `main` always run `test` and
+`e2e`, which also covers what the gate can't: it tested the head, not the
+merge with a `main` that moved since. They run with `BASE_SHA` set to the
+push's `before`, so an operator repository's selective check
+(`hack/ci/select.sh`) judges what the push brought, as merged, rather than
+running the whole suite after every merge; each repository's nightly run
+covers everything. A push with no usable `before` (a new branch, a forced
+push) runs everything. `trust_offload = false` in `repos.toml`
 turns this off for a repository.
 
 **Shards.** `test_shards = N` (1 to 16) runs `test` as N jobs, `test 1/N`
