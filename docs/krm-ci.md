@@ -120,6 +120,7 @@ the same on a laptop, on an offload VM and in CI:
 | Input | Operator profile | Vendor profile |
 | --- | --- | --- |
 | `setup` | `task tools` | none |
+| `lint_setup` (lint job and weekly scan, before golangci-lint, govulncheck and CodeQL load the packages) | `task upstream` (go.mod replaces into `third_party/`) | none |
 | `check` (hermetic) | `task check` | generate, build, vet (including `-tags live`), `go test` |
 | `e2e` | `task operator-e2e` | none |
 | `live_command` | none until the migration | `go test -tags live -run TestEveryKindLive` |

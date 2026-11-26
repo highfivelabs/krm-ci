@@ -77,3 +77,5 @@ remote:
 | factory `taskfiles/v1.0.0` | The four tasks above, from `ack-extensions` and `config-connector-extensions` (`taskfiles/go.yml`) and `aso-extensions` (`taskfiles/common.yml`). `test-envtest` takes both `CMD` (config-connector-extensions) and `TIMEOUT` (ack-extensions); `committed` takes `HINT` (aso-extensions' `diff-clean`). |
 | krm-ci `v1.1.0` | Moved here from factory, unchanged but for the include URL in this file's header. |
 | krm-ci `v1.2.0` | `licenses.yml`: `licenses:check`, `licenses:headers`, `licenses:deps` (HFL-714). |
+| krm-ci `v1.2.1` | Unchanged (krm-ci.yml judges a push on the commits it pushed). |
+| krm-ci `v1.2.2` | Unchanged (krm-ci.yml's lint job and krm-security.yml run `lint-setup-command`). |

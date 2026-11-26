@@ -25,7 +25,7 @@ on:
         type: string
         default: ./...
       setup-command:
-        description: Runs before CodeQL builds the code
+        description: Runs before govulncheck and CodeQL load the packages (an operator repository's upstream checkout; the caller passes lint_setup); Task is installed when set
         type: string
         default: ""
 
@@ -58,6 +58,16 @@ jobs:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
       - run: .hfl-ci/ci/krm/tools.sh gitleaks govulncheck zizmor && echo "${KRM_TOOLS}" >> "${GITHUB_PATH}"
+      - if: inputs.setup-command != ''
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+        with:
+          version: 3.54.0
+          repo-token: ${{ github.token }}
+      - if: inputs.setup-command != ''
+        working-directory: src
+        env:
+          CMD: ${{ inputs.setup-command }}
+        run: bash -euo pipefail -c "${CMD}"
       - name: Scan
         id: scan
         working-directory: src
@@ -112,6 +122,11 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+      - if: inputs.setup-command != ''
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+        with:
+          version: 3.54.0
+          repo-token: ${{ github.token }}
       - if: inputs.setup-command != ''
         env:
           CMD: ${{ inputs.setup-command }}
