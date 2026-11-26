@@ -32,6 +32,7 @@
 # (docs/krm-ci.md, "Cloud trust").
 
 [profile.vendor]
+lint_setup = ""
 live = true
 setup = ""
 # hack/ci.sh is the repository's own check (generated files current, build,
@@ -62,6 +63,9 @@ live_timeout = 45
 # those, and their credentials come from offload VMs today (review round 1,
 # R3).
 [profile.operator]
+# golangci-lint and govulncheck load the packages, which build against the
+# upstream checkout (go.mod replaces into third_party/): fetch it first.
+lint_setup = "task upstream"
 live = false
 live_cloud = "none"
 live_command = ""
@@ -82,6 +86,7 @@ sweep = ""
 # The runtime has no live run of its own; the vendor repositories' live
 # runs exercise it.
 [profile.runtime]
+lint_setup = ""
 live = false
 setup = ""
 check = "hack/ci.sh"

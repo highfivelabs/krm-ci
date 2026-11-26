@@ -27,6 +27,7 @@ jobs:
     with:
       ci-ref: @@{ci_ref}
       setup-command: @@{setup}
+      lint-setup-command: @@{lint_setup}
       check-command: @@{check}
       e2e-command: @@{e2e}
       free-disk: @@{free_disk}
