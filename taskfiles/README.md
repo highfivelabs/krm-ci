@@ -79,3 +79,4 @@ remote:
 | krm-ci `v1.2.0` | `licenses.yml`: `licenses:check`, `licenses:headers`, `licenses:deps` (HFL-714). |
 | krm-ci `v1.2.1` | Unchanged (krm-ci.yml judges a push on the commits it pushed). |
 | krm-ci `v1.2.2` | Unchanged (krm-ci.yml's lint job and krm-security.yml run `lint-setup-command`). |
+| krm-ci `v1.2.3` | Unchanged (govulncheck looks at `govulncheck-packages`, the binaries). |
