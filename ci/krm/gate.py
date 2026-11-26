@@ -17,8 +17,9 @@ tree, so a pull request cannot change the rules it is judged by.
   gate.py vulns     --base FILE --head FILE    (govulncheck -format json)
   gate.py comment   --sha SHA --verdict FILE --classify FILE
                     [--first-pass FILE] [--run-url URL]   -> Markdown
+  gate.py offload   --statuses FILE --sha SHA [--context offload/ci]
 
-Each prints one JSON object on stdout. `verdict`, `live` and `vulns` exit 0
+Each prints one JSON object on stdout. `verdict`, `live`, `vulns` and `offload` exit 0
 when the gate passes, 1 when it does not, and 2 on bad input. Bad input never passes.
 """
 from __future__ import annotations
@@ -360,6 +361,46 @@ def decide_live(
     return LiveDecision(not reasons, sha, kinds, reasons)
 
 
+# --- Whether the offload gate already ran the check -------------------------
+
+OFFLOAD_CONTEXT = "offload/ci"
+
+
+@dataclass
+class OffloadDecision:
+    passed: bool
+    sha: str = ""
+    creator: str = ""
+    reason: str = ""
+
+
+def decide_offload(statuses: list[dict], sha: str, context: str = OFFLOAD_CONTEXT) -> OffloadDecision:
+    """Whether a repository's pre-push gate (its hack/ci/gate.sh, on an
+    offload VM) already ran krm-ci.yml's test and e2e on this exact commit,
+    so they can be skipped. statuses: GET /commits/{sha}/statuses, newest
+    first. Only the newest status of the context counts, and it must be
+    success, for this SHA, posted by a person: GitHub lets only users with
+    push access create a commit status, while any workflow in the
+    repository can post one as github-actions[bot], so a Bot's status
+    never counts (decide_live's rule)."""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return OffloadDecision(False, reason="no head commit")
+    st = next((s for s in statuses if s.get("context") == context), None)
+    if st is None:
+        return OffloadDecision(False, sha, reason=f"no {context} status on {sha[:12]}")
+    creator = st.get("creator") or {}
+    login = creator.get("login", "")
+    if st.get("state") != "success":
+        return OffloadDecision(False, sha, login, f"{context} is {st.get('state')} on {sha[:12]}")
+    if creator.get("type") != "User":
+        return OffloadDecision(False, sha, login, f"{context} on {sha[:12]} was posted by {login or 'unknown'} ({creator.get('type') or 'no type'}), not a person")
+    # GET /commits/{sha}/statuses names no SHA per status; the URL does.
+    url = st.get("url", "")
+    if url and not url.endswith("/" + sha):
+        return OffloadDecision(False, sha, login, f"{context} is for another commit")
+    return OffloadDecision(True, sha, login, f"{context} passed on {sha[:12]} (posted by {login})")
+
+
 # --- Whether a pull request is reviewed now ---------------------------------
 
 REVIEW_COMMAND = re.compile(r"^/review[ \t]*$")
@@ -547,6 +588,10 @@ def main(argv=None) -> int:
     a.add_argument("--first-pass")
     a.add_argument("--classify", required=True)
     a.add_argument("--run-url", default="")
+    a = sub.add_parser("offload")
+    a.add_argument("--statuses", required=True)
+    a.add_argument("--sha", required=True)
+    a.add_argument("--context", default=OFFLOAD_CONTEXT)
     args = ap.parse_args(argv)
 
     try:
@@ -578,6 +623,17 @@ def main(argv=None) -> int:
             )
             print(json.dumps(asdict(d)))
             return 0 if d.ok else 1
+        if args.cmd == "offload":
+            try:
+                statuses = _load(args.statuses)
+            except (OSError, ValueError):
+                statuses = None
+            if not isinstance(statuses, list):
+                print(json.dumps(asdict(OffloadDecision(False, args.sha, reason="unreadable statuses"))))
+                return 1
+            d = decide_offload(statuses, args.sha, args.context)
+            print(json.dumps(asdict(d)))
+            return 0 if d.passed else 1
         if args.cmd == "admit":
             d = decide_admit(event_name=args.event_name, event=_load(args.event), pr=_load(args.pr),
                              commenter_role=args.role,

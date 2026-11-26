@@ -18,6 +18,14 @@
 #          under an accepted licence (permissive, or MPL-2.0 linked
 #          unmodified), on a push and on a pull request that changes go.mod.
 #   e2e    the repository's kind end-to-end test, when it has one.
+#   plan   whether test and e2e run at all, and test's shards. On a pull
+#          request whose head already has the repository's pre-push gate
+#          status (offload/ci: hack/ci/gate.sh ran this same check and e2e
+#          on that commit, on an offload VM) posted by a person, they are
+#          skipped (gate.py offload). Pushes to main always run them.
+#          test-shards > 1 runs test as that many jobs, each with
+#          KRM_SHARD and KRM_SHARDS set (ci/krm/shard.sh lists a shard's
+#          packages); the licence steps run in shard 1 only.
 #   ci     the one status branch protection requires: fails if any job
 #          above failed or was cancelled; a skipped job is fine
 #          (Config Connector's presubmit-gatekeeper).
@@ -85,6 +93,14 @@ on:
         description: The packages whose linked Go modules' licences are checked after the hermetic check (taskfiles/licenses.yml); empty checks only file headers
         type: string
         default: ./...
+      test-shards:
+        description: How many jobs the test job is split into (1 to 16); the check command reads KRM_SHARD and KRM_SHARDS (ci/krm/shard.sh)
+        type: number
+        default: 1
+      trust-offload-status:
+        description: On a pull request, skip test and e2e when the head commit has a successful offload/ci status posted by a person (the repository's pre-push gate ran them there)
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -248,7 +264,67 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: never
 
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+    outputs:
+      gated: ${{ steps.offload.outputs.gated }}
+      shards: ${{ steps.shards.outputs.shards }}
+    steps:
+      - id: shards
+        env:
+          N: ${{ inputs.test-shards }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${N}" =~ ^([1-9]|1[0-6])$ ]]; then
+            echo "::error::test-shards is ${N}; 1 to 16"
+            exit 1
+          fi
+          echo "shards=[$(seq -s, 1 "${N}")]" >> "${GITHUB_OUTPUT}"
+      - if: inputs.trust-offload-status && github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: highfivelabs/krm-ci
+          ref: ${{ inputs.ci-ref }}
+          path: .hfl-ci
+          sparse-checkout: ci/krm
+          persist-credentials: false
+      # The rule is krm-ci's (gate.py, at ci-ref), never the pull request's.
+      # Any failure to read the statuses means test and e2e run.
+      - id: offload
+        if: inputs.trust-offload-status && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          gated=false
+          d=""
+          if gh api "repos/${REPO}/commits/${SHA}/statuses?per_page=100" > "${RUNNER_TEMP}/statuses.json"; then
+            if d="$(python3 -I .hfl-ci/ci/krm/gate.py offload --statuses "${RUNNER_TEMP}/statuses.json" --sha "${SHA}")"; then
+              gated=true
+            fi
+          fi
+          reason="$(jq -r '.reason // empty' <<<"${d}" 2>/dev/null || true)"
+          echo "gated=${gated}" >> "${GITHUB_OUTPUT}"
+          if [[ "${gated}" == true ]]; then
+            echo "test and e2e skipped: ${reason}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "test and e2e run: ${reason:-could not read the statuses}"
+          fi
+
   test:
+    needs: plan
+    if: needs.plan.outputs.gated != 'true'
+    name: ${{ inputs.test-shards > 1 && format('test {0}/{1}', matrix.shard, inputs.test-shards) || 'test' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -289,22 +365,28 @@ jobs:
           repository: highfivelabs/krm-ci
           ref: ${{ inputs.ci-ref }}
           path: .hfl-ci
-          sparse-checkout: taskfiles
+          sparse-checkout: |
+            taskfiles
+            ci/krm
           persist-credentials: false
       - name: Licences (file headers)
+        if: matrix.shard == 1
         run: task --taskfile ../../.hfl-ci/taskfiles/licenses.yml headers
       - name: Hermetic check
         env:
           CMD: ${{ inputs.check-command }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          KRM_SHARD: ${{ matrix.shard }}
+          KRM_SHARDS: ${{ inputs.test-shards }}
+          KRM_CI_DIR: ${{ github.workspace }}/.hfl-ci
         run: bash -euo pipefail -c "${CMD}"
       # After the check: an operator repository's packages load only once
       # its check has fetched the upstream checkout. A pull request that
       # changes no go.mod, go.sum or .licenses-allow.txt links the same
       # modules as its base, so it skips this; a push checks everything.
       - name: Licences (linked Go modules)
-        if: inputs.licenses-packages != ''
+        if: inputs.licenses-packages != '' && matrix.shard == 1
         env:
           PKGS: ${{ inputs.licenses-packages }}
           EVENT: ${{ github.event_name }}
@@ -328,7 +410,8 @@ jobs:
           fi
 
   e2e:
-    if: inputs.e2e-command != ''
+    needs: plan
+    if: inputs.e2e-command != '' && needs.plan.outputs.gated != 'true'
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -370,7 +453,7 @@ jobs:
           kubectl get events -A --sort-by=.lastTimestamp | tail -n 100 || true
 
   ci:
-    needs: [lint, test, e2e]
+    needs: [plan, lint, test, e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -379,7 +462,7 @@ jobs:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "lint, test, e2e: ${RESULTS}"
+          echo "plan, lint, test, e2e: ${RESULTS}"
           for r in ${RESULTS}; do
             case "${r}" in success|skipped) ;; *) exit 1 ;; esac
           done

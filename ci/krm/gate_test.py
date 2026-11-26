@@ -405,3 +405,56 @@ class CLI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def off_status(state="success", ctx="offload/ci", login="someone", typ="User", sha=SHA):
+    return {"context": ctx, "state": state, "creator": {"login": login, "type": typ},
+            "url": f"https://api.github.com/repos/o/r/statuses/{sha}"}
+
+
+class OffloadTest(unittest.TestCase):
+    def test_passed(self):
+        d = gate.decide_offload([off_status()], SHA)
+        self.assertTrue(d.passed, d.reason)
+        self.assertEqual(d.creator, "someone")
+
+    def test_only_the_newest_counts(self):
+        # Newest first: a later failure after an older success.
+        d = gate.decide_offload([off_status("failure"), off_status()], SHA)
+        self.assertFalse(d.passed)
+        self.assertIn("failure", d.reason)
+
+    def test_a_bot_never_counts(self):
+        for login in ("github-actions[bot]", "highfivelabs-factory[bot]"):
+            d = gate.decide_offload([off_status(login=login, typ="Bot")], SHA)
+            self.assertFalse(d.passed, login)
+
+    def test_missing_type_does_not_count(self):
+        st = off_status()
+        del st["creator"]["type"]
+        self.assertFalse(gate.decide_offload([st], SHA).passed)
+
+    def test_other_contexts_ignored(self):
+        self.assertFalse(gate.decide_offload([off_status(ctx="hfl/review")], SHA).passed)
+        self.assertFalse(gate.decide_offload([], SHA).passed)
+
+    def test_other_commit(self):
+        self.assertFalse(gate.decide_offload([off_status(sha=OTHER)], SHA).passed)
+
+    def test_bad_sha(self):
+        self.assertFalse(gate.decide_offload([off_status()], "HEAD").passed)
+
+    def test_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "s.json")
+            with open(p, "w") as fh:
+                json.dump([off_status()], fh)
+            r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(__file__), "gate.py"), "offload", "--statuses", p, "--sha", SHA],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(json.loads(r.stdout)["passed"])
+            with open(p, "w") as fh:
+                fh.write("not json")
+            r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(__file__), "gate.py"), "offload", "--statuses", p, "--sha", SHA],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)

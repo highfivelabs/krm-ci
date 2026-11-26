@@ -40,7 +40,7 @@ OUTPUTS = {
 # Values inserted as YAML scalars: quoted with JSON's escaping, which YAML's
 # double-quoted style reads the same way.
 QUOTED = {"setup", "lint_setup", "check", "e2e", "sibling", "sibling_ref", "licenses_packages", "live_command", "sweep", "live_cloud"}
-RAW = {"ci_ref", "ci_tag", "free_disk", "timeout", "live_timeout", "security_cron"}
+RAW = {"ci_ref", "ci_tag", "free_disk", "timeout", "live_timeout", "security_cron", "test_shards", "trust_offload"}
 FLAGS = {"live"}
 # The header every rendered file starts with (callers/*.yml); sync only
 # deletes a file that carries it.
@@ -76,6 +76,10 @@ def load(path: str) -> list[dict]:
         for k in ("timeout", "live_timeout"):
             if not isinstance(merged[k], int) or isinstance(merged[k], bool) or not 5 <= merged[k] <= 360:
                 raise ValueError(f"{name}: {k} must be minutes, 5 to 360")
+        if not isinstance(merged["test_shards"], int) or isinstance(merged["test_shards"], bool) or not 1 <= merged["test_shards"] <= 16:
+            raise ValueError(f"{name}: test_shards must be 1 to 16")
+        if not isinstance(merged["trust_offload"], bool):
+            raise ValueError(f"{name}: trust_offload must be true or false")
         if not CRON.fullmatch(str(merged["security_cron"])):
             raise ValueError(f"{name}: security_cron {merged['security_cron']!r} is not a cron expression")
         repos.append(merged)

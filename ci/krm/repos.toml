@@ -26,12 +26,20 @@
 #   live_timeout            minutes
 #   security_cron           the weekly scan's schedule, spread so the
 #                           repositories don't all run at once
+#   test_shards             jobs the test job is split into (1 to 16); more
+#                           than 1 only once the check command reads
+#                           KRM_SHARD and KRM_SHARDS (ci/krm/shard.sh)
+#   trust_offload           skip test and e2e on a pull request whose head
+#                           has a person's offload/ci success (the
+#                           repository's pre-push gate ran them)
 #
 # Live runs stay off in a repository until its variable HFL_LIVE_ENABLED is
 # 'true': set it once the cloud trusts the repository's `live` environment
 # (docs/krm-ci.md, "Cloud trust").
 
 [profile.vendor]
+test_shards = 1
+trust_offload = true
 lint_setup = ""
 live = true
 setup = ""
@@ -63,6 +71,8 @@ live_timeout = 45
 # those, and their credentials come from offload VMs today (review round 1,
 # R3).
 [profile.operator]
+test_shards = 1
+trust_offload = true
 # golangci-lint and govulncheck load the packages, which build against the
 # upstream checkout (go.mod replaces into third_party/): fetch it first.
 lint_setup = "task upstream"
@@ -88,6 +98,8 @@ sweep = ""
 # The runtime has no live run of its own; the vendor repositories' live
 # runs exercise it.
 [profile.runtime]
+test_shards = 1
+trust_offload = true
 lint_setup = ""
 live = false
 setup = ""

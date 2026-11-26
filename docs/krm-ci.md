@@ -153,7 +153,35 @@ token. Nothing in the workflow asks for more.
 | `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes (on a push to `main`, in the commits pushed); a reachable vulnerability that is new in the PR's head or the push |
 | `test` | no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header in the repository's own files (`taskfiles/licenses.yml`); the repository's hermetic check; every Go module linked into `licenses_packages` under an accepted licence (on a push, or a PR that changes `go.mod`); "the working tree is clean" | a copyleft or source-available header; a module outside the accepted set and not reviewed in `.licenses-allow.txt`; failure or drift |
 | `e2e` | kind end to end, if the repository has one | failure |
+| `plan` | whether `test` and `e2e` run (the offload gate's status), and `test`'s shards | an unreadable `test_shards` |
 | `ci` | the gatekeeper | anything above failed or was cancelled (skipped is fine) |
+
+**The offload gate stands in for `test` and `e2e` (HFL-728).** The operator
+repositories' pre-push hook runs `hack/ci/gate.sh`: this same check and e2e,
+on the exact commit, on a 16-vCPU offload Spot VM with a warm Go cache
+(about 37 GB, more than GitHub's 10 GB cache allows). On success it posts
+the commit status `offload/ci`. On GitHub's 4-vCPU runner, starting cold,
+the same check took over 90 minutes (config-connector-extensions#170,
+ack-extensions#140). So on a pull request, `plan` reads the head commit's
+statuses, and `gate.py offload` decides. When the newest `offload/ci` is
+success and was posted by a person, `test` and `e2e` are skipped and `ci`
+passes on `lint`. A Bot's status never counts: any workflow in the
+repository can post one as `github-actions[bot]`, but GitHub lets only a
+user with push access post a commit status. A fork's pull request has no
+such status, so it runs everything. Pushes to `main` always run everything,
+which also covers what the gate can't: it tested the head, not the merge
+with a `main` that moved since. `trust_offload = false` in `repos.toml`
+turns this off for a repository.
+
+**Shards.** `test_shards = N` (1 to 16) runs `test` as N jobs, `test 1/N`
+to `test N/N`. Each job's check command gets `KRM_SHARD` (1-based) and
+`KRM_SHARDS`, with krm-ci checked out at `KRM_CI_DIR`.
+`"${KRM_CI_DIR}/ci/krm/shard.sh" ./...` prints the shard's packages: those
+with tests, sorted, every Nth from the shard's index. A repository sets
+`test_shards` above 1 only once its check command reads these variables;
+until then, every shard would run the whole check. Which shard runs the
+static checks is up to the repository (shard 1 is the convention). The
+licence steps run in shard 1 only.
 
 **Licences (HFL-714).** A dependency may be permissive (Apache-2.0, MIT,
 BSD, ISC, Zlib, Unicode) or MPL-2.0. MPL code is linked unmodified, never

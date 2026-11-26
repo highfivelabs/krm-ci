@@ -72,6 +72,13 @@ class Sync(unittest.TestCase):
             finally:
                 os.unlink(fh.name)
 
+    def test_shards_and_offload(self):
+        for r in sync.load(sync.os.path.join(sync.HERE, "repos.toml")):
+            out = sync.outputs(r, "a" * 40)[sync.OUTPUTS["hfl-ci.yml"]]
+            self.assertIn(f"test-shards: {r['test_shards']}\n", out)
+            self.assertIn("trust-offload-status: true\n", out)
+            self.assertIn("statuses: read", out)
+
     def test_bad_config(self):
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
             fh.write('[profile.p]\nsetup=""\n[[repo]]\nname="x"\nprofile="p"\n')

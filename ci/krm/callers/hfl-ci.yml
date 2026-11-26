@@ -24,6 +24,7 @@ jobs:
     uses: highfivelabs/krm-ci/.github/workflows/krm-ci.yml@@@{ci_ref} # @@{ci_tag}
     permissions:
       contents: read
+      statuses: read
     with:
       ci-ref: @@{ci_ref}
       setup-command: @@{setup}
@@ -36,3 +37,5 @@ jobs:
       sibling-ref: @@{sibling_ref}
       licenses-packages: @@{licenses_packages}
       govulncheck-packages: @@{licenses_packages}
+      test-shards: @@{test_shards}
+      trust-offload-status: @@{trust_offload}
