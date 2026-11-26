@@ -339,9 +339,19 @@ jobs:
       run:
         working-directory: src/${{ github.event.repository.name }}
     steps:
+      # Deleting the SDKs in place took ~3 minutes (HFL-731), mostly
+      # Android's many small files. Renaming them aside on the same
+      # filesystem is instant; they are deleted in the background while the
+      # checkout, Go and the tools install, well before the build needs the
+      # space.
       - if: inputs.free-disk && runner.environment == 'github-hosted'
         working-directory: /
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        run: |
+          trash="$(sudo mktemp -d /.free-disk.XXXXXX)"
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL; do
+            [ -e "$d" ] && sudo mv "$d" "$trash/$(echo "$d" | tr / _)"
+          done
+          sudo setsid nohup rm -rf "$trash" >/dev/null 2>&1 < /dev/null &
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src/${{ github.event.repository.name }}
@@ -437,9 +447,19 @@ jobs:
       run:
         working-directory: src/${{ github.event.repository.name }}
     steps:
+      # Deleting the SDKs in place took ~3 minutes (HFL-731), mostly
+      # Android's many small files. Renaming them aside on the same
+      # filesystem is instant; they are deleted in the background while the
+      # checkout, Go and the tools install, well before the build needs the
+      # space.
       - if: inputs.free-disk && runner.environment == 'github-hosted'
         working-directory: /
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        run: |
+          trash="$(sudo mktemp -d /.free-disk.XXXXXX)"
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL; do
+            [ -e "$d" ] && sudo mv "$d" "$trash/$(echo "$d" | tr / _)"
+          done
+          sudo setsid nohup rm -rf "$trash" >/dev/null 2>&1 < /dev/null &
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src/${{ github.event.repository.name }}
