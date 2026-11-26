@@ -375,8 +375,8 @@ the same environment.
 ## 7. Weekly security (`krm-security.yml`)
 
 - **gitleaks** over the whole history, **govulncheck** over the whole
-  module and **zizmor** over every workflow. A finding opens or updates one
-  issue labelled `security-scan`.
+  module and **zizmor** over every workflow. A finding fails the run, and
+  the factory's build doctor files the failed run in Linear (HFL-732).
 - **CodeQL** (Go) and **OpenSSF Scorecard**, on public repositories, where
   both are free.
 - Schedules are spread across the week (`security_cron` in `repos.toml`).
