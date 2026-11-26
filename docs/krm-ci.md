@@ -178,8 +178,8 @@ covers everything. A push with no usable `before` (a new branch, a forced
 push) runs everything. `trust_offload = false` in `repos.toml`
 turns this off for a repository.
 
-**Shards.** `test_shards = N` (1 to 16) runs `test` as N jobs, `test 1/N`
-to `test N/N`. Each job's check command gets `KRM_SHARD` (1-based) and
+**Shards.** `test_shards = N` (1 to 16) runs `test` as N jobs, `test (1)`
+to `test (N)`. Each job's check command gets `KRM_SHARD` (1-based) and
 `KRM_SHARDS`, with krm-ci checked out at `KRM_CI_DIR`.
 `"${KRM_CI_DIR}/ci/krm/shard.sh" ./...` prints the shard's packages: those
 with tests, sorted, every Nth from the shard's index. A repository sets
