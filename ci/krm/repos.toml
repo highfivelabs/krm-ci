@@ -72,7 +72,10 @@ live_timeout = 45
 # R3).
 [profile.operator]
 test_shards = 1
-trust_offload = true
+# The repositories are public and a full check fits a GitHub-hosted runner
+# (32 to 56 minutes), so test and e2e always run there; the pre-push gate
+# is opt-in (HFL-818).
+trust_offload = false
 # golangci-lint and govulncheck load the packages, which build against the
 # upstream checkout (go.mod replaces into third_party/): fetch it first.
 lint_setup = "task upstream"
@@ -137,9 +140,6 @@ profile = "operator"
 licenses_packages = "./cmd/manager"
 live_cloud = "azure"
 security_cron = "40 9 * * 1"
-# Public, and its full check fits a GitHub-hosted runner: test and e2e
-# always run there; the pre-push gate is opt-in (HFL-818).
-trust_offload = false
 
 [[repo]]
 name = "krm-rest-runtime"
