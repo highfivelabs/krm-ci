@@ -6,12 +6,57 @@
 # live credential most often slips in). A repository adds its own
 # false positives in .gitleaksignore (fingerprints), never by disabling a
 # rule here.
+#
+# The allowlists below cover the shapes that are known to be fine across
+# the KRM repositories (HFL-815). Every one of them is limited to the
+# catch-all generic-api-key rule, so the rules for real credential formats
+# (AWS, GitHub, GCP, Slack, private keys and the rest) still fire
+# everywhere, generated files included. Keep each pattern narrow: one that
+# could also match a random string would hide a real key. Cassettes get no
+# allowance of their own.
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Generated upstream schemas and third-party checkouts"
 paths = [
   '''^third_party/''',
   '''(^|/)go\.sum$''',
+]
+
+[[allowlists]]
+description = "Files generated from a vendor's public API spec, whose examples are the vendor's documentation values"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^types\.yaml$''',                       # vendor repos: the generator's input, from the OpenAPI spec
+  '''^hack/gen/terraform-gaps\.json$''',     # resource and field names
+  '''^hack/upjet/[^/]+\.json$''',            # Upjet schema data (HFL-697)
+  '''(^|/)zz_generated[^/]*$''',
+  '''^config/crds/''',                       # CRDs: field docs from the upstream API
+  '''^docs/kinds/''',                        # rendered from the CRDs
+  '''^cloudcontrol/pkg/registry/schemas/''', # AWS CloudFormation registry schemas
+]
+
+[[allowlists]]
+description = "Values that are placeholders, not secrets"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = [
+  # Sequences and placeholders people type into tests and docs.
+  '''0123456789|1234567890|9876543210|(?i:abcdef|abc123|deadbeef|example|redacted|placeholder|changeme|dummy|fake)''',
+  # Templated values: {{redacted}}, ${VAR}, <token>.
+  '''\{\{[^}]*\}\}|\$\{[^}]+\}|^<[^>]+>$''',
+  # ALL_CAPS enum names (TR31_K0_KEY_ENCRYPTION_KEY, RSA_X509_PEM).
+  '''^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+\.?$''',
+  # snake_case identifiers: Terraform resource and field names.
+  '''^[a-z][a-z0-9]*(_[a-z0-9]+)+$''',
+  # Go expressions read as a value: iter.Key, f.Condition.KeyPrefixEquals,
+  # EIPAssociation.ec2, rawPrefix+ackOrg+. Each part after a dot starts
+  # upper case or is a short lower-case word, which a JWT's base64
+  # segments ("eyJ...") are not.
+  '''^[A-Za-z_][A-Za-z0-9_]*(\.[A-Z][A-Za-z0-9_]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*\.[a-z0-9]{2,5}$''',
+  '''^([A-Za-z_][A-Za-z0-9_]*\+)+$''',
+  # Cloud resource paths, not values: organizations/O/instances/I.
+  '''^(organizations|projects|folders|locations|instances|accounts|subscriptions)/''',
 ]
