@@ -177,7 +177,8 @@ push's `before`, so an operator repository's selective check
 running the whole suite after every merge; each repository's nightly run
 covers everything. A push with no usable `before` (a new branch, a forced
 push) runs everything. `trust_offload = false` in `repos.toml`
-turns this off for a repository.
+turns this off for a repository: aso-extensions has it, since its full
+check fits GitHub's free runner (HFL-818).
 
 **Prose-only pull requests skip `lint`, `test` and `e2e` (HFL-805).** When
 every file a pull request changes is prose no check reads, `plan` says so and

@@ -137,6 +137,9 @@ profile = "operator"
 licenses_packages = "./cmd/manager"
 live_cloud = "azure"
 security_cron = "40 9 * * 1"
+# Public, and its full check fits a GitHub-hosted runner: test and e2e
+# always run there; the pre-push gate is opt-in (HFL-818).
+trust_offload = false
 
 [[repo]]
 name = "krm-rest-runtime"

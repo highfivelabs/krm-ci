@@ -93,7 +93,7 @@ class Sync(unittest.TestCase):
         for r in sync.load(sync.os.path.join(sync.HERE, "repos.toml")):
             out = sync.outputs(r, "a" * 40)[sync.OUTPUTS["hfl-ci.yml"]]
             self.assertIn(f"test-shards: {r['test_shards']}\n", out)
-            self.assertIn("trust-offload-status: true\n", out)
+            self.assertIn(f"trust-offload-status: {str(r['trust_offload']).lower()}\n", out)
             self.assertIn("statuses: read", out)
 
     def test_bad_config(self):
