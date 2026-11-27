@@ -154,7 +154,7 @@ token. Nothing in the workflow asks for more.
 | `lint` | actionlint; zizmor (online: impostor commits, ref confusion); gofmt; golangci-lint (the repository's config or the baseline's, `--new-from-merge-base`); gitleaks over the PR's commits; govulncheck on base and head; dependency review (public repositories) | any finding in what the PR changes (on a push to `main`, in the commits pushed); a reachable vulnerability that is new in the PR's head or the push |
 | `test` | no MPL, GPL, AGPL, LGPL, SSPL or BUSL licence header in the repository's own files (`taskfiles/licenses.yml`); the repository's hermetic check; every Go module linked into `licenses_packages` under an accepted licence (on a push, or a PR that changes `go.mod`); "the working tree is clean" | a copyleft or source-available header; a module outside the accepted set and not reviewed in `.licenses-allow.txt`; failure or drift |
 | `e2e` | kind end to end, if the repository has one | failure |
-| `plan` | whether `test` and `e2e` run (the offload gate's status), and `test`'s shards | an unreadable `test_shards` |
+| `plan` | whether `lint`, `test` and `e2e` run (a prose-only pull request skips all three; the offload gate's status skips `test` and `e2e`), and `test`'s shards | an unreadable `test_shards` |
 | `ci` | the gatekeeper | anything above failed or was cancelled (skipped is fine) |
 
 **The offload gate stands in for `test` and `e2e` (HFL-728).** The operator
@@ -178,6 +178,21 @@ running the whole suite after every merge; each repository's nightly run
 covers everything. A push with no usable `before` (a new branch, a forced
 push) runs everything. `trust_offload = false` in `repos.toml`
 turns this off for a repository.
+
+**Prose-only pull requests skip `lint`, `test` and `e2e` (HFL-805).** When
+every file a pull request changes is prose no check reads, `plan` says so and
+the three jobs are skipped; `ci` still reports, and passes, so a ruleset that
+requires `ci` is satisfied. Prose is a fixed list in krm-ci (`gate.py`
+`PROSE`): the agent files (`AGENTS.md`, `CLAUDE.md`, at any depth),
+`README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+`LICENSE` and `NOTICE`. It names files, never a type or a directory, because
+`docs/*.md` may be generated and checked as current. A repository adds its
+own with the `prose-paths` input (globs). A rename counts only if both names
+are prose. `plan` lists the files with GitHub's compare of the base and
+head, which needs only `contents: read`; 300 files or more (compare's limit)
+or any failure to list them means everything runs. The rule is krm-ci's at
+`ci-ref`, never the pull request's. Pushes to `main` and merge queues always
+run everything.
 
 **Shards.** `test_shards = N` (1 to 16) runs `test` as N jobs, `test (1)`
 to `test (N)`. Each job's check command gets `KRM_SHARD` (1-based) and
@@ -386,7 +401,7 @@ the same environment.
 | Setting | Value |
 | --- | --- |
 | Ruleset on `main` | Require the `ci` status, one approving review (CODEOWNERS), dismiss stale reviews, linear history, no force push, merge queue on |
-| Actions: fork pull request workflows | "Require approval for first-time contributors" (GitHub's own gate in front of ours) |
+| Actions: fork pull request workflows | "Require approval for all external contributors" (GitHub's own gate in front of ours). Set on the organization and every public repository by hand on 2026-11-27 (HFL-805); the GitHub provider has no resource for it |
 | Actions: workflow permissions | Read-only `GITHUB_TOKEN` by default; Actions can't approve pull requests |
 | Actions: allowed actions | "Selected": GitHub's, `google-github-actions/*`, `aws-actions/*`, `azure/*`, `golangci/*`, `ossf/*`, `arduino/setup-task`, `peter-evans/*`, and require SHA pinning (the org setting `sha_pinning_required`, now false) |
 | Security | Secret scanning and push protection; private vulnerability reporting; Dependabot alerts and security updates |
