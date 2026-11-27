@@ -401,6 +401,47 @@ def decide_offload(statuses: list[dict], sha: str, context: str = OFFLOAD_CONTEX
     return OffloadDecision(True, sha, login, f"{context} passed on {sha[:12]} (posted by {login})")
 
 
+# --- Prose-only pull requests skip lint, test and e2e ------------------------
+
+# Files no check reads: the agent files and a repository's front-matter prose.
+# Named one by one, never by type or directory: docs/*.md may be generated
+# and checked as current, and a spec is Markdown that checks read. A
+# repository adds its own with krm-ci.yml's prose-paths input.
+PROSE = [
+    "AGENTS.md", "CLAUDE.md", "**/AGENTS.md", "**/CLAUDE.md",
+    "README.md", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md",
+    "LICENSE", "NOTICE",
+]
+MAX_PR_FILES = 300  # GitHub's compare lists at most this many files; a list that long may be cut
+
+
+@dataclass
+class ProseDecision:
+    prose: bool
+    files: int = 0
+    reason: str = ""
+
+
+def decide_prose(files: list[dict], extra: list[str] | None = None, max_files: int = MAX_PR_FILES) -> ProseDecision:
+    """Whether every file a pull request changes is prose no check reads, so
+    lint, test and e2e can be skipped. files: the "files" of GitHub's
+    compare of the pull request's base and head (the same entries as "list
+    pull request files", which needs a permission callers don't grant). A rename counts only when both names are prose. No
+    files, or a list that may be cut short, means the checks run."""
+    globs = PROSE + [g for g in (extra or []) if g]
+    n = len(files)
+    if n == 0:
+        return ProseDecision(False, 0, "no changed files listed")
+    if n >= max_files:
+        return ProseDecision(False, n, f"{n} files; GitHub may have cut the list")
+    for f in files:
+        names = [f.get("filename", "")] + ([f["previous_filename"]] if f.get("previous_filename") else [])
+        for name in names:
+            if not name or not _match(name, globs):
+                return ProseDecision(False, n, f"{name or 'a file'} is not prose")
+    return ProseDecision(True, n, f"all {n} changed files are prose")
+
+
 # --- Whether a pull request is reviewed now ---------------------------------
 
 REVIEW_COMMAND = re.compile(r"^/review[ \t]*$")
@@ -588,6 +629,9 @@ def main(argv=None) -> int:
     a.add_argument("--first-pass")
     a.add_argument("--classify", required=True)
     a.add_argument("--run-url", default="")
+    a = sub.add_parser("prose")
+    a.add_argument("--files", required=True)
+    a.add_argument("--extra", default="", help="more prose globs, comma- or newline-separated")
     a = sub.add_parser("offload")
     a.add_argument("--statuses", required=True)
     a.add_argument("--sha", required=True)
@@ -623,6 +667,18 @@ def main(argv=None) -> int:
             )
             print(json.dumps(asdict(d)))
             return 0 if d.ok else 1
+        if args.cmd == "prose":
+            try:
+                files = _load(args.files)
+            except (OSError, ValueError):
+                files = None
+            if not isinstance(files, list):
+                print(json.dumps(asdict(ProseDecision(False, reason="unreadable file list"))))
+                return 1
+            extra = [g.strip() for g in re.split(r"[,\n]", args.extra) if g.strip()]
+            d = decide_prose(files, extra)
+            print(json.dumps(asdict(d)))
+            return 0 if d.prose else 1
         if args.cmd == "offload":
             try:
                 statuses = _load(args.statuses)

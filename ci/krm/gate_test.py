@@ -458,3 +458,60 @@ class OffloadTest(unittest.TestCase):
             r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(__file__), "gate.py"), "offload", "--statuses", p, "--sha", SHA],
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 1)
+
+
+def pf(name, prev=None):
+    f = {"filename": name, "additions": 1, "deletions": 0, "status": "modified"}
+    if prev:
+        f["previous_filename"] = prev
+        f["status"] = "renamed"
+    return f
+
+
+class ProseTest(unittest.TestCase):
+    def test_agent_files_and_front_matter_are_prose(self):
+        d = gate.decide_prose([pf("AGENTS.md"), pf("CLAUDE.md"), pf("README.md"), pf("LICENSE"), pf("sub/AGENTS.md")])
+        self.assertTrue(d.prose, d.reason)
+        self.assertEqual(d.files, 5)
+
+    def test_other_markdown_is_not_prose(self):
+        # docs/ may be generated and checked as current; specs are read by checks.
+        for name in ("docs/kinds/Foo.md", "spec/behaviors.md", "CHANGELOG.md"):
+            self.assertFalse(gate.decide_prose([pf("README.md"), pf(name)]).prose, name)
+
+    def test_code_and_ci_are_not_prose(self):
+        for name in ("main.go", ".github/workflows/hfl-ci.yml", "Taskfile.yml", "go.mod"):
+            d = gate.decide_prose([pf(name)])
+            self.assertFalse(d.prose, name)
+            self.assertIn(name, d.reason)
+
+    def test_rename_needs_both_names_prose(self):
+        self.assertFalse(gate.decide_prose([pf("README.md", prev="hack/run.sh")]).prose)
+        self.assertFalse(gate.decide_prose([pf("hack/run.sh", prev="README.md")]).prose)
+        self.assertTrue(gate.decide_prose([pf("README.md", prev="CONTRIBUTING.md")]).prose)
+
+    def test_extra_globs(self):
+        self.assertFalse(gate.decide_prose([pf("docs/guide/intro.md")]).prose)
+        self.assertTrue(gate.decide_prose([pf("docs/guide/intro.md")], ["docs/guide/**"]).prose)
+
+    def test_empty_or_possibly_cut_lists_run_the_checks(self):
+        self.assertFalse(gate.decide_prose([]).prose)
+        self.assertFalse(gate.decide_prose([pf("README.md")] * gate.MAX_PR_FILES).prose)
+
+    def test_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "files.json")
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py")
+            with open(p, "w") as fh:
+                json.dump([pf("docs/guide/intro.md")], fh)
+            r = subprocess.run([sys.executable, "-I", script, "prose", "--files", p], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            r = subprocess.run([sys.executable, "-I", script, "prose", "--files", p, "--extra", "docs/guide/**, x/**"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue(json.loads(r.stdout)["prose"])
+            with open(p, "w") as fh:
+                fh.write("not json")
+            r = subprocess.run([sys.executable, "-I", script, "prose", "--files", p], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("unreadable", r.stdout)

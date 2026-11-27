@@ -100,6 +100,10 @@ on:
         description: How many jobs the test job is split into (1 to 16); the check command reads KRM_SHARD and KRM_SHARDS (ci/krm/shard.sh)
         type: number
         default: 1
+      prose-paths:
+        description: More files no check reads, as globs (comma- or newline-separated), on top of krm-ci's list (gate.py PROSE). A pull request that changes only these skips lint, test and e2e
+        type: string
+        default: ""
       trust-offload-status:
         description: On a pull request, skip test and e2e when the head commit has a successful offload/ci status posted by a person (the repository's pre-push gate ran them there)
         type: boolean
@@ -112,6 +116,8 @@ env:
 
 jobs:
   lint:
+    needs: plan
+    if: needs.plan.outputs.prose != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -289,7 +295,10 @@ jobs:
       contents: read
       statuses: read
     outputs:
-      gated: ${{ steps.offload.outputs.gated }}
+      # test and e2e are skipped when either the offload gate ran them or
+      # the pull request is prose only; lint only for prose.
+      gated: ${{ steps.offload.outputs.gated == 'true' || steps.prose.outputs.prose == 'true' }}
+      prose: ${{ steps.prose.outputs.prose == 'true' }}
       shards: ${{ steps.shards.outputs.shards }}
     steps:
       - id: shards
@@ -302,7 +311,7 @@ jobs:
             exit 1
           fi
           echo "shards=[$(seq -s, 1 "${N}")]" >> "${GITHUB_OUTPUT}"
-      - if: inputs.trust-offload-status && github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: highfivelabs/krm-ci
@@ -310,6 +319,36 @@ jobs:
           path: .hfl-ci
           sparse-checkout: ci/krm
           persist-credentials: false
+      # A pull request that changes only prose no check reads (gate.py
+      # PROSE, plus prose-paths) skips lint, test and e2e; ci still reports.
+      # The rule is krm-ci's, never the pull request's. The file list comes
+      # from compare (contents: read; the pull request files endpoint needs
+      # pull-requests: read, which callers don't grant). Any failure to read
+      # it means everything runs.
+      - id: prose
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          EXTRA: ${{ inputs.prose-paths }}
+        run: |
+          set -uo pipefail
+          prose=false
+          d=""
+          if gh api "repos/${REPO}/compare/${BASE}...${HEAD}" --jq '.files // []' > "${RUNNER_TEMP}/files.json"; then
+            if d="$(python3 -I .hfl-ci/ci/krm/gate.py prose --files "${RUNNER_TEMP}/files.json" --extra "${EXTRA}")"; then
+              prose=true
+            fi
+          fi
+          reason="$(jq -r '.reason // empty' <<<"${d}" 2>/dev/null || true)"
+          echo "prose=${prose}" >> "${GITHUB_OUTPUT}"
+          if [[ "${prose}" == true ]]; then
+            echo "lint, test and e2e skipped: ${reason}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "lint, test and e2e run: ${reason:-could not list the changed files}"
+          fi
       # The rule is krm-ci's (gate.py, at ci-ref), never the pull request's.
       # Any failure to read the statuses means test and e2e run.
       - id: offload
