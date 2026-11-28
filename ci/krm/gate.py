@@ -467,6 +467,7 @@ def decide_admit(
     commenter_role: str = "",
     auto_associations=("OWNER", "MEMBER"),
     allowed_roles=("admin", "maintain", "write"),
+    people: dict | None = None,
 ) -> Admission:
     """Whether to run the review now, and on what. A model review costs
     money, so only organisation members are reviewed on their own pushes;
@@ -475,7 +476,16 @@ def decide_admit(
     event_name: pull_request_target or issue_comment. pr: GET /pulls/{n},
     fetched by the workflow (for pull_request_target, the event's own
     pull_request is the same object). commenter_role: role_name of the
-    comment's author (issue_comment only)."""
+    comment's author (issue_comment only).
+
+    people (pull_request_target): {"author_role": role_name of the pull
+    request's author, "commit_authors": {login: role_name} for each commit's
+    author, "unlinked": commits whose author is no GitHub user}. A member's
+    author_association reads CONTRIBUTOR when their membership is private,
+    and GITHUB_TOKEN can't see private membership, so the role write,
+    maintain or admin stands in for it. A pull request is reviewed
+    automatically only when its author and every commit's author are
+    trusted; Co-authored-by trailers are not commit authors."""
     def target(reason, run=True, wait=False):
         return Admission(run, wait, reason, int(pr.get("number") or 0), pr.get("head", {}).get("sha", ""),
                          (pr.get("head", {}).get("repo") or {}).get("full_name", ""), pr.get("base", {}).get("sha", ""))
@@ -488,9 +498,23 @@ def decide_admit(
         if event.get("action") not in REVIEW_ACTIONS:
             return Admission(False, reason=f"action {event.get('action')} does not start a review")
         assoc = pr.get("author_association", "")
-        if assoc in auto_associations:
-            return target(f"{assoc}: reviewed automatically")
-        return target(f"{assoc or 'NONE'}: waits for a maintainer's /review", run=False, wait=True)
+        author = (pr.get("user") or {}).get("login") or "the author"
+        if people is None:
+            if assoc in auto_associations:
+                return target(f"{assoc}: reviewed automatically")
+            return target(f"{assoc or 'NONE'}: waits for a maintainer's /review", run=False, wait=True)
+        role = people.get("author_role") or "none"
+        if assoc not in auto_associations and role not in allowed_roles:
+            return target(f"{author} ({assoc or 'NONE'}, role {role}): waits for a maintainer's /review",
+                          run=False, wait=True)
+        if people.get("unlinked"):
+            return target(f"{people['unlinked']} commit(s) by no GitHub user: waits for a maintainer's /review",
+                          run=False, wait=True)
+        outside = sorted(u for u, r in (people.get("commit_authors") or {}).items() if r not in allowed_roles)
+        if outside:
+            return target(f"commits by {', '.join(outside)} (not members): waits for a maintainer's /review",
+                          run=False, wait=True)
+        return target(f"{author} and every commit's author are members: reviewed automatically")
     if event_name == "issue_comment":
         c = event.get("comment", {})
         if event.get("action") != "created" or not event.get("issue", {}).get("pull_request"):
@@ -617,6 +641,7 @@ def main(argv=None) -> int:
     a.add_argument("--pr", required=True)
     a.add_argument("--role", default="")
     a.add_argument("--auto", default="OWNER,MEMBER", help="author associations reviewed without /review")
+    a.add_argument("--people", help="JSON: the author's and each commit author's role (pull_request_target)")
     a = sub.add_parser("redact")
     a.add_argument("--file", required=True)
     a.add_argument("--redact-env", nargs="*", default=[])
@@ -693,7 +718,8 @@ def main(argv=None) -> int:
         if args.cmd == "admit":
             d = decide_admit(event_name=args.event_name, event=_load(args.event), pr=_load(args.pr),
                              commenter_role=args.role,
-                             auto_associations=tuple(a for a in args.auto.split(",") if a))
+                             auto_associations=tuple(a for a in args.auto.split(",") if a),
+                             people=_load(args.people) if args.people else None)
             print(json.dumps(asdict(d)))
             return 0
         if args.cmd == "redact":

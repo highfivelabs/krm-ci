@@ -237,10 +237,17 @@ in place on every run.
 
 **When it runs: behind a comment, so nobody can run up the cost.**
 
-- Pull requests from organisation members (`author_association` OWNER or
-  MEMBER; that's us and our agents) are reviewed on every push.
-- Anyone else's pull request, including collaborators and past
-  contributors, gets the status `hfl/security-review: pending, waiting for
+- Pull requests from organisation members are reviewed on every push, when
+  the author and every commit's author are members. Co-authored-by trailers
+  (such as an agent's `claude`) don't count as commit authors. A member is
+  `author_association` OWNER or MEMBER, or the role write, maintain or
+  admin on the repository. The role matters because our memberships are
+  private: GitHub then reports a member as CONTRIBUTOR, and `GITHUB_TOKEN`
+  can't see private membership. Read doesn't count, because anyone has read
+  on a public repository. A commit whose author is no GitHub user, or is
+  anyone else (including bots), sends the pull request to `/review`
+  (HFL-837).
+- Anyone else's pull request, including past contributors, gets the status `hfl/security-review: pending, waiting for
   a maintainer to comment /review`. It is reviewed only when someone with
   the role write, maintain or admin comments `/review` (the comment's first
   line; bots don't count). Each `/review` reviews the head at that moment,
