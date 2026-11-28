@@ -18,6 +18,10 @@ otherwise
 
 The essentials, in case you can't read it:
 
+- Start every piece of work in a new git worktree under
+  `highfivelabs/.worktrees/`, branched from `origin/main`. Never make or
+  switch branches in a repo's own checkout, which stays on `main`. Remove the
+  worktree when its PR merges.
 - Claim the Linear issue in coord before you edit (`coord claim HFL-n`), and
   put its key in the branch name and PR title.
 - Open pull requests as drafts. Mark one ready only when it's finished and
