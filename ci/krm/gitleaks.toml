@@ -32,6 +32,7 @@ paths = [
   '''^hack/gen/terraform-gaps\.json$''',     # resource and field names
   '''^hack/upjet/[^/]+\.json$''',            # Upjet schema data (HFL-697)
   '''(^|/)zz_generated[^/]*$''',
+  '''_gen\.go$''',                           # Go code generators (aso-extensions' apis/arm)
   '''^config/crds/''',                       # CRDs: field docs from the upstream API
   '''^docs/kinds/''',                        # rendered from the CRDs
   '''^cloudcontrol/pkg/registry/schemas/''', # AWS CloudFormation registry schemas
