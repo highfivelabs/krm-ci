@@ -328,6 +328,41 @@ class Admit(unittest.TestCase):
             self.assertFalse(d.run, a)
             self.assertTrue(d.wait, a)
 
+    def ppl(self, assoc="CONTRIBUTOR", author_role="write", commits=None, unlinked=0):
+        people = {"author_role": author_role, "commit_authors": commits if commits is not None else {"alice": "admin"},
+                  "unlinked": unlinked}
+        return gate.decide_admit(event_name="pull_request_target", event={"action": "synchronize"},
+                                 pr=fullpr(assoc), people=people)
+
+    def test_private_member_by_role(self):
+        # A member with private membership reads CONTRIBUTOR; their role says they're one of us.
+        for role in ("write", "maintain", "admin"):
+            d = self.ppl(author_role=role)
+            self.assertTrue(d.run, role)
+            self.assertFalse(d.wait, role)
+
+    def test_outsider_author_waits(self):
+        for role in ("read", "triage", "none", ""):
+            d = self.ppl(author_role=role)
+            self.assertFalse(d.run, role)
+            self.assertTrue(d.wait, role)
+
+    def test_every_commit_author_must_be_a_member(self):
+        d = self.ppl(assoc="MEMBER", commits={"alice": "admin", "mallory": "none"})
+        self.assertFalse(d.run)
+        self.assertTrue(d.wait)
+        self.assertIn("mallory", d.reason)
+        self.assertFalse(self.ppl(commits={"dependabot[bot]": "none"}).run)
+
+    def test_unlinked_commit_waits(self):
+        d = self.ppl(unlinked=1)
+        self.assertFalse(d.run)
+        self.assertTrue(d.wait)
+
+    def test_members_only_commits_run(self):
+        # Co-authored-by trailers never reach commit_authors: only each commit's author does.
+        self.assertTrue(self.ppl(commits={"alice": "admin", "bob": "write"}).run)
+
     def test_label_or_close_does_nothing(self):
         self.assertFalse(self.pt("MEMBER", action="labeled").run)
         self.assertFalse(self.pt("MEMBER", action="closed").wait)

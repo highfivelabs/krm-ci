@@ -105,12 +105,29 @@ jobs:
           set -euo pipefail
           t="${RUNNER_TEMP}"
           gh api "repos/${REPO}/pulls/${NUMBER}" > "${t}/pr.json"
+          role_of() { gh api "repos/${REPO}/collaborators/$1/permission" --jq .role_name 2>/dev/null || echo none; }
           role=""
+          people=()
           if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
-            role="$(gh api "repos/${REPO}/collaborators/${USER}/permission" --jq .role_name 2>/dev/null || echo none)"
+            role="$(role_of "${USER}")"
+          else
+            # Members' membership is private, so author_association reads
+            # CONTRIBUTOR; their role on the repository (write or above;
+            # anyone has read on a public repository) says who they are.
+            # Every commit's author counts; Co-authored-by trailers don't.
+            gh api --paginate "repos/${REPO}/pulls/${NUMBER}/commits" --jq '.[] | (.author.login // "")' > "${t}/logins"
+            unlinked="$(grep -c '^$' "${t}/logins" || true)"
+            { grep -v '^$' "${t}/logins" || true; } | sort -u | while read -r u; do
+              printf '%s\t%s\n' "${u}" "$(role_of "${u}")"
+            done > "${t}/roles.tsv"
+            jq -Rn --arg ar "$(role_of "$(jq -r .user.login "${t}/pr.json")")" --argjson un "${unlinked:-0}" \
+              '{author_role: $ar, unlinked: $un, commit_authors: ([inputs | split("\t") | {(.[0]): .[1]}] | add // {})}' \
+              < "${t}/roles.tsv" > "${t}/people.json"
+            cat "${t}/people.json"
+            people=(--people "${t}/people.json")
           fi
           python3 -I .hfl-ci/ci/krm/gate.py admit --event-name "${EVENT_NAME}" --event "${GITHUB_EVENT_PATH}" \
-            --pr "${t}/pr.json" --role "${role}" --auto "${AUTO}" > "${t}/admit.json"
+            --pr "${t}/pr.json" --role "${role}" --auto "${AUTO}" "${people[@]}" > "${t}/admit.json"
           cat "${t}/admit.json"
           jq -r '"run=\(.run)", "number=\(.number)", "sha=\(.sha)", "head-repo=\(.head_repo)", "base-sha=\(.base_sha)"' \
             "${t}/admit.json" >> "${GITHUB_OUTPUT}"
